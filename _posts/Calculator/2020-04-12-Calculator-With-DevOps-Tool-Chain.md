@@ -1,3 +1,8 @@
+---
+published: true
+categories: [Docker, Springboot, Jenkins, ELK]
+tags: [java, hibernate, jenkins, elk, docker]
+---
 
 DockerHub Profile: [https://hub.docker.com/r/pilaniya1337/calculator](https://hub.docker.com/r/pilaniya1337/calculator) <br>
 GitHub Profile:[https://github.com/mukeshpilaniya/calculator](https://github.com/mukeshpilaniya/calculator)
