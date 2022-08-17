@@ -1,4 +1,4 @@
-1. Array 
+1. ### Array 
     - Array Internals and fundamentals
         - An array in Go is a fixed-length data type that contains a contiguous block of elements
     of the same type.
@@ -28,7 +28,7 @@ elements
         - Passing an array between functions can be an expensive operation in terms of memory and performance. 
         - When your variable is an array, this means the entire array, regardless
 of its size, is copied and passed to the function.
-2. Slice 
+2. ### Slice 
     - Slice internals and fundamentals
         - Slices are built around the concept of dynamic arrays that can grow and
 shrink 
@@ -207,7 +207,7 @@ underlying array
             ![Slice passing to func](https://github.com/mukeshpilaniya/blog/blob/master/_posts/Golang/images/slice_pass_func.png?raw=true)
         - On a 64-bit architecture, a slice requires 24 bytes of memory while passing to functions.The pointer field
 requires 8 bytes, and the length and capacity fields require 8 bytes respectively
-3. Map
+3. ### Map
     - Map internals and fundamentals
         - A map is a data structure that provides you with an unordered collection of key/value pairs.
         - The strength of a map is its ability to
@@ -315,7 +315,7 @@ reflected by all references to the map.
             map[10:1 30:3 40:4 50:5]
             ```
         
-4. Summary
+4. ### Summary
     - Arrays are the building blocks for both slices and maps.
     - Slices are the idiomatic way in Go you work with collections of data. Maps are
 the way you work with key/value pairs of data.

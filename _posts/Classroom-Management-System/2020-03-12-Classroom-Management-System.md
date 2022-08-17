@@ -1,7 +1,5 @@
 ---
-title: Classroom Management System
 published: true
-date: 2020-03-12
 categories: [DevOps, Springboot]
 tags: [devops, jenkins, springboot, docker]
 ---
