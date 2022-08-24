@@ -32,8 +32,8 @@ space, handles to files, devices, and threads.
   - User level thread also known as green thread, coroutine in C, **goroutine in Go** and fiber in Ruby.
 ---
 
-| Process      | Thread (Kernel Thread) | Goroutine / (User Thread)     |  
-| :---        |    :----:   |          ---: |  
+| Process | Thread (Kernel Thread) | Goroutine / (User Thread) |
+| :--- | :----: | ---: |
 | Program under execution is known as a process. it should reside in the main memory and occupies cpu to execute instructions and should be in active state. | Kernel level thread is a light weight process and implemented by the Operating system| User level thread also light weighted process but implemented by the user/programmer/programming language |
 | Context switching time between processes is more and creating a process will take more time. | Context switching time between kernel level thread will take less time than context switching between process also creation of kernel level thread also take less time than creation of a process. | User level thread is having less context switching time and creation of user level thread will take less time than kernel level thread. |
 | OS schedular is responsible for scheduling process | The kernel thread scheduler is in charge of scheduling kernel threads. | User/Programming Schedular (Golang schedular) is responsible for shceduling user thread/goroutines. |
@@ -77,6 +77,7 @@ If there is any operation that should or would affect goroutine execution like g
 2. N:1 Scheduling (Multilex all goroutine on a single kernel thread)
   - no concurrency (if one goroutine is performing blocking all than the thread will block which means all the other goroutine don't get run )
   - no parallelism (can only use a single CPU core, even if more cpur core are available)  
+  
     ```go
     package main
 
@@ -143,6 +144,7 @@ If there is any operation that should or would affect goroutine execution like g
 > If we set rumtime.GOMAXPROCS() value to 1 than does my program run concurrently ?
 
   - Let's consider the same program with time.Sleep func inside the goroutine, which will force go schedular to shcedular another goroutine when first one is blocked.  
+
   ```go
   package main
 
