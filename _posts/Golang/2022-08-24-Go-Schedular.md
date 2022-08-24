@@ -30,10 +30,10 @@ space, handles to files, devices, and threads.
     - Effetive utilisation of multiprocessor system
     - Resource sharing (Code, Data, Address Space, Files, Global Variables)
   - User level thread also known as green thread, coroutine in C, **goroutine in Go** and fiber in Ruby.
-  
 ---
-| Process      | Thread (Kernel Thread) | Goroutine / (User Thread)     |
-| :---        |    :----:   |          ---: |
+
+| Process      | Thread (Kernel Thread) | Goroutine / (User Thread)     |  
+| :---        |    :----:   |          ---: |  
 | Program under execution is known as a process. it should reside in the main memory and occupies cpu to execute instructions and should be in active state. | Kernel level thread is a light weight process and implemented by the Operating system| User level thread also light weighted process but implemented by the user/programmer/programming language |
 | Context switching time between processes is more and creating a process will take more time. | Context switching time between kernel level thread will take less time than context switching between process also creation of kernel level thread also take less time than creation of a process. | User level thread is having less context switching time and creation of user level thread will take less time than kernel level thread. |
 | OS schedular is responsible for scheduling process | The kernel thread scheduler is in charge of scheduling kernel threads. | User/Programming Schedular (Golang schedular) is responsible for shceduling user thread/goroutines. |
@@ -76,73 +76,73 @@ If there is any operation that should or would affect goroutine execution like g
       - no infinite stack
 2. N:1 Scheduling (Multilex all goroutine on a single kernel thread)
   - no concurrency (if one goroutine is performing blocking all than the thread will block which means all the other goroutine don't get run )
-  - no parallelism (can only use a single CPU core, even if more cpur core are available)
-  ```go
-  package main
+  - no parallelism (can only use a single CPU core, even if more cpur core are available)  
+    ```go
+    package main
 
-  import (
-    "fmt"
-    "runtime"
-    "sync"
-  )
+    import (
+      "fmt"
+      "runtime"
+      "sync"
+    )
 
-  func main(){
-    // Allocate 1 logical processor for the scheduler to use.
-    runtime.GOMAXPROCS(1)
-    var wg sync.WaitGroup
-    wg.Add(2)
+    func main(){
+      // Allocate 1 logical processor for the scheduler to use.
+      runtime.GOMAXPROCS(1)
+      var wg sync.WaitGroup
+      wg.Add(2)
 
-    fmt.Println("Starting Goroutines")
+      fmt.Println("Starting Goroutines")
 
-    // Declare an anonymous function and create a goroutine.
-    go func(){
-      // Schedule the call to Done to tell main we are done.
-      defer wg.Done()
-      // Display the alphabet 3 times
-        for count:=0;count<3;count++{
-            for ch:='a';ch <'a'+26;ch++{
-                fmt.Printf("%c ",ch)
-            }
-            fmt.Println()
-        }
-    }()
-      
-    // Declare an anonymous function and create a goroutine.
-    go func(){
-      // Schedule the call to Done to tell main we are done.
-      defer wg.Done()
-      // Display the numbers 3 times
-        for count:=0;count<3;count++{
-            for n:=1;n <=26;n++{
-                fmt.Printf("%d ",n)
-            }
-            fmt.Println()
-        }
-    }()
-      
-     // Wait for the goroutines to finish.
-     fmt.Println("Waiting To Finish")
-     wg.Wait()
-     fmt.Println("\nTerminating Program")
-  }
+      // Declare an anonymous function and create a goroutine.
+      go func(){
+        // Schedule the call to Done to tell main we are done.
+        defer wg.Done()
+        // Display the alphabet 3 times
+          for count:=0;count<3;count++{
+              for ch:='a';ch <'a'+26;ch++{
+                  fmt.Printf("%c ",ch)
+              }
+              fmt.Println()
+          }
+      }()
+        
+      // Declare an anonymous function and create a goroutine.
+      go func(){
+        // Schedule the call to Done to tell main we are done.
+        defer wg.Done()
+        // Display the numbers 3 times
+          for count:=0;count<3;count++{
+              for n:=1;n <=26;n++{
+                  fmt.Printf("%d ",n)
+              }
+              fmt.Println()
+          }
+      }()
+        
+      // Wait for the goroutines to finish.
+      fmt.Println("Waiting To Finish")
+      wg.Wait()
+      fmt.Println("\nTerminating Program")
+    }
 
- > go run main.go
-  Starting Goroutines
-Waiting To Finish
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
+    > go run main.go
+    Starting Goroutines
+    Waiting To Finish
+    1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+    1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+    1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+    a b c d e f g h i j k l m n o p q r s t u v w x y z 
+    a b c d e f g h i j k l m n o p q r s t u v w x y z 
+    a b c d e f g h i j k l m n o p q r s t u v w x y z 
 
-Terminating Program
-  ```
+    Terminating Program
+    ```
   - At line 18 and 31 both of these functions are created as goroutines by using the keyword go. You can see by the output that the code inside each goroutine is running concurrently within a single logical processor. Well you can question output of this program is printed as numeric and then char value so how you will trust that this is runnning in concurrent mannar.
 
 > If we set rumtime.GOMAXPROCS() value to 1 than does my program run concurrently ?
 
-  - Let's consider the same program with time.Sleep func inside the goroutine, which will force go schedular to shcedular another goroutine when first one is blocked.
+  - Let's consider the same program with time.Sleep func inside the goroutine, which will force go schedular to shcedular another goroutine when first one is blocked.  
   ```go
   package main
 
@@ -204,15 +204,15 @@ Terminating Program
 
   > go run main2.go 
   Starting Goroutines
-Waiting To Finish
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
-a b c d e f g h i j k l m n o p q r s t u v w x y z 
-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+  Waiting To Finish
+  a b c d e f g h i j k l m n o p q r s t u v w x y z 
+  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+  a b c d e f g h i j k l m n o p q r s t u v w x y z 
+  a b c d e f g h i j k l m n o p q r s t u v w x y z 
+  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
 
-Terminating Program
+  Terminating Program
   ```
   - Here you can see even if we set runtime.GOMAXPROCS(1) to 1, the program is running concurrently.
 3. Thread Pool  
