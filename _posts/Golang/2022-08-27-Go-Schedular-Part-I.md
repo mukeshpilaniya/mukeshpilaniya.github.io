@@ -1,6 +1,16 @@
 
+---
+published: true
+categories: [Golang, Go]
+tags: [go, golang]
+---
+
+---
 ### Process
 ---
+  - Process contains common resources that may be allocated
+by any process. These resources include but are not limited to a memory address
+space, handles to files, devices, and threads. 
   - Process will have various attributes like
     - Process ID
     - Process State
@@ -15,7 +25,7 @@
     - Signals and signal handlers
     - Accounting information
   
-
+---
 ### Thread
 ---
   - Thread is a light weight process and an thread will share resources of the process like code, data, global variables, files and memory address space among all the thread within the process but **stack and register** cannot be shared, every thread have it's own stakcs and registers.
@@ -25,19 +35,19 @@
     - Faster context switching due to less attributes
     - Effetive utilisation of multiprocessor system
     - Resource sharing (Code, Data, Address Space, Files, Global Variables)
-  - User level thread also known as green thread, coroutine in C, goroutinr in Go and fiber in Ruby.
+  - User level thread also known as green thread, coroutine in C, **goroutine in Go** and fiber in Ruby.
   
-
-
+---
 | Process      | Thread (Kernel Thread) | Goroutine / (User Thread)     |
 | :---        |    :----:   |          ---: |
 | Program under execution is known as a process. it should reside in the main memory and occupies cpu to execute instructions and should be in active state. | Kernel level thread is a light weight process and implemented by the Operating system| User level thread also light weighted process but implemented by the user/programmer/programming language |
 | Context switching time between processes is more and creating a process will take more time. | Context switching time between kernel level thread will take less time than context switching between process also creation of kernel level thread also take less time than creation of a process. | User level thread is having less context switching time and creation of user level thread will take less time than kernel level thread. |
 | OS schedular is responsible for scheduling process | The kernel thread scheduler is in charge of scheduling kernel threads. | User/Programming Schedular (Golang schedular) is responsible for shceduling user thread/goroutines. |
-
-
+---
+  ![Process_vs_Thread](./images/process_vs_thread.png)
 > So it's more efficient to create multiple user thread(goroutine ) inside one process as compare to the process creation which is time consuming and resource intensive.
 
+---
 ### Go Specific 
 ---
   - In Go user level thread is known as **Goroutine**.
@@ -65,6 +75,7 @@ If there is any operation that should or would affect goroutine execution like g
 > How go schedular will multiplexes goroutines into kernel threads ?
 
 1. 1:1 Scheduling (Thread per goroutine)
+      - [ ] Parallel execution
       - would work but too expensive.
       - memory at least ~32k (memory for user stack and kernel stacks)
       - performance issues (calling syscall)
@@ -72,7 +83,144 @@ If there is any operation that should or would affect goroutine execution like g
 2. N:1 Scheduling (Multilex all goroutine on a single kernel thread)
   - no concurrency (if one goroutine is performing blocking all than the thread will block which means all the other goroutine don't get run )
   - no parallelism (can only use a single CPU core, even if more cpur core are available)
-  - `example form go in action book`
+  ```go
+  package main
+
+  import (
+    "fmt"
+    "runtime"
+    "sync"
+  )
+
+  func main(){
+    // Allocate 1 logical processor for the scheduler to use.
+    runtime.GOMAXPROCS(1)
+    var wg sync.WaitGroup
+    wg.Add(2)
+
+    fmt.Println("Starting Goroutines")
+
+    // Declare an anonymous function and create a goroutine.
+    go func(){
+      // Schedule the call to Done to tell main we are done.
+      defer wg.Done()
+      // Display the alphabet 3 times
+        for count:=0;count<3;count++{
+            for ch:='a';ch <'a'+26;ch++{
+                fmt.Printf("%c ",ch)
+            }
+            fmt.Println()
+        }
+    }()
+      
+    // Declare an anonymous function and create a goroutine.
+    go func(){
+      // Schedule the call to Done to tell main we are done.
+      defer wg.Done()
+      // Display the numbers 3 times
+        for count:=0;count<3;count++{
+            for n:=1;n <=26;n++{
+                fmt.Printf("%d ",n)
+            }
+            fmt.Println()
+        }
+    }()
+      
+     // Wait for the goroutines to finish.
+     fmt.Println("Waiting To Finish")
+     wg.Wait()
+     fmt.Println("\nTerminating Program")
+  }
+
+ > go run main.go
+  Starting Goroutines
+Waiting To Finish
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+
+Terminating Program
+  ```
+  - At line 18 and 31 both of these functions are created as goroutines by using the keyword go. You can see by the output that the code inside each goroutine is running concurrently within a single logical processor. Well you can question output of this program is printed as numeric and then char value so how you will trust that this is runnning in concurrent mannar.
+
+> If we set rumtime.GOMAXPROCS() value to 1 than does my program run concurrently ?
+
+  - Let's consider the same program with time.Sleep func inside the goroutine, which will force go schedular to shcedular another goroutine when first one is blocked.
+  ```go
+  package main
+
+  import (
+    "fmt"
+    "runtime"
+    "sync"
+     "time"
+  )
+
+  func main(){
+    // Allocate 1 logical processor for the scheduler to use.
+    runtime.GOMAXPROCS(1)
+    var wg sync.WaitGroup
+    wg.Add(2)
+
+    fmt.Println("Starting Goroutines")
+
+    // Declare an anonymous function and create a goroutine.
+    go func(){
+      // Schedule the call to Done to tell main we are done.
+      defer wg.Done()
+      // Display the alphabet 3 times
+        for count:=0;count<3;count++{
+            if count==1{
+                time.Sleep(10*time.Second)
+            }
+            for ch:='a';ch <'a'+26;ch++{
+                fmt.Printf("%c ",ch)
+            }
+            fmt.Println()
+        }
+    }()
+      
+    // Declare an anonymous function and create a goroutine.
+    go func(){
+      // Schedule the call to Done to tell main we are done.
+      defer wg.Done()
+      // Display the numbers 3 times
+        for count:=0;count<3;count++{
+            if count==0{
+                time.Sleep(5*time.Second)
+            }
+            if count==2{
+                time.Sleep(7*time.Second)
+            }
+            for n:=1;n <=26;n++{
+                fmt.Printf("%d ",n)
+            }
+            fmt.Println()
+        }
+    }()
+      
+     // Wait for the goroutines to finish.
+     fmt.Println("Waiting To Finish")
+     wg.Wait()
+     fmt.Println("\nTerminating Program")
+  }
+
+  > go run main2.go 
+  Starting Goroutines
+Waiting To Finish
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+a b c d e f g h i j k l m n o p q r s t u v w x y z 
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 
+
+Terminating Program
+  ```
+  - Here you can see even if we set runtime.GOMAXPROCS(1) to 1, the program is running concurrently.
 3. Thread Pool  
   - Create thread when needed which means create a thread if there are goroutine to run but all the other threads are busy.
   - Once the thread complete it's execution rather than distroying reuse it.
@@ -82,7 +230,7 @@ If there is any operation that should or would affect goroutine execution like g
   - M represents number of OS Thread
   - N represents number of goroutine
   - Creation of goroutine is cheap and we can fully control complete lifecycle of goroutine beacuse it's created in user space.
-  - Creation of OS thread is expensive and we don't have control over it but using multiple thread we can achieve  parallelism.
+  - Creation of OS thread is expensive and we don't have control over it but using multiple thread we can achieve parallelism.
   - In this model multiple goroutine is multiplex into kernel threads.
   - Goroutine state
       - Running
@@ -117,7 +265,7 @@ If there is any operation that should or would affect goroutine execution like g
     - [x] handling of IO and syscalls
     - [x] parallel executions of goroutine
     - [ ] not scalable (All the kernel level thread try to acess gloabl run queue with mutex enable. So due to **contention** this is not easy to scale)
-5. Distributed Run Queue Scheduler  
+5. M:P:N Threading Distributed Run Queue Scheduler  
   To solve the sclable problem where every thread is try to access the mutex at the same time, per thread local run queue is maintained. 
     - Per thread state (local run queue)
     - Still have global run queue  
