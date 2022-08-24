@@ -1,11 +1,5 @@
 
 ---
-published: true
-categories: [Golang, Go]
-tags: [go, golang]
----
-
----
 ### Process
 ---
   - Process contains common resources that may be allocated
