@@ -49,6 +49,7 @@ space, handles to files, devices, and threads.
     - Lightweight
     - Parallel execution
     - Scalable
+    - Infinite Stack (Max stack size is 1 GB on 64-bit, 250 MB on 32-bit.)
     - Handling of blocking calls
       - Sending and Receing on Channel
       - Network IO calls
@@ -57,15 +58,15 @@ space, handles to files, devices, and threads.
       - Mutexes
     - Efficient (work stealing)
 
-> Why Go have a schedular ?  
+> **Why Go have a schedular ?**  
 
 Go uses user level thread known as **goroutine** , which are lighter and cheaper than kernel level thread. for example creation of initial goroutine will take 2KB of stack size and kernel level thread will take 8KB of stack size. Also goroutine has faster creation, destruction and faster context switches than kernel thread So go schedular needs to exits to schedule goroutine.OS can't schedule user level thread, OS only know about kernel level thread. Go schedular multiplexes goroutines to kernel level threads, which will run on the differnet CPU core.
 
-> When to schedule goroutines ?
+> **When to schedule goroutines ?**
 
 If there is any operation that should or would affect goroutine execution like goroutine starting and blocking call etc...
   
-> How go schedular will multiplexes goroutines into kernel threads ?
+> **How go schedular will multiplexes goroutines into kernel threads ?**
 
 1. 1:1 Scheduling (Thread per goroutine)
       - Parallel execution (each thread can run on different core)
@@ -74,7 +75,6 @@ If there is any operation that should or would affect goroutine execution like g
       - performance issues (calling syscall)
       - no infinite stack
 2. N:1 Scheduling (Multilex all goroutine on a single kernel thread)
-   - no concurrency (if one goroutine is performing blocking all than the thread will block which means all the other goroutine don't get run )
    - no parallelism (can only use a single CPU core, even if more cpu core are available)  
 
     ```go
@@ -141,7 +141,7 @@ If there is any operation that should or would affect goroutine execution like g
   
    - At line 18 and 31 both functions are created as goroutines by the keyword go. You can see by the output that the code inside each goroutine is running concurrently within a single logical processor. Well you can question by seeing the output of this program they are running one after another, so then how it's running in concurrent mannar.
 
-   > If we set rumtime.GOMAXPROCS() value to 1 than does my program run concurrently ?
+   > **If we set rumtime.GOMAXPROCS() value to 1 than does my program run concurrently ?**
 
    - Let's consider the same program with time.Sleep func inside the goroutine, which will force go schedular to shcedular another goroutine when first one is blocked.  
 
@@ -352,7 +352,7 @@ If there is any operation that should or would affect goroutine execution like g
     }
    ```
 
-    ![Goroutiine Block On Channel](https://github.com/mukeshpilaniya/blog/blob/master/_posts/Golang/images/shared_queue_channel.gif?raw=true)
+    ![Goroutiine Block On Channel](/assets/images/shared_schedular_during_channel_operations.gif)
    - The same mechanism is used for Mutexes, Timers and Network IO.
    - If a goroutine is blocked on the system call then the situation is differnt because we don't know what is happing in the kernel space. Channels are created in the user space so we have full control over it but in the case of system call we don't have.
    - Blocking system call will block goroutine and underline kernel thread as well.
@@ -381,13 +381,15 @@ If there is any operation that should or would affect goroutine execution like g
       RET
     ```
    - When the system call is made to the kernel then it has two decideding points, one is entry point and another one is exit point.
-    ![Goroutine Blocked on SysCall](https://github.com/mukeshpilaniya/blog/blob/master/_posts/Golang/images/shared_queue_syscall.gif?raw=true)
 
-   > How many kernel thread OS can supports ?
+    ![Goroutine Blocked on SysCall](/assets/images/shared_schedular_during_system_call_operations.gif)
 
-   > How many goroutine per program Go can support ?
+   > **How many kernel thread OS can supports ?**
 
-   > How many kernel thread per program GO can support ?
+   > **How many goroutine per program Go can support ?**
+
+   > **How many kernel thread per program GO can support ?**
+
    - Conclusion
      - Number of kernel thread can be more than number of core. #kernel Thread >#Core
      - [x] lightweight goroutines
@@ -398,16 +400,11 @@ If there is any operation that should or would affect goroutine execution like g
 5. M:N Threading Distributed Run Queue Scheduler  
    To solve the sclable problem where every thread is try to access the mutex at the same time, per thread local run queue is maintained. 
     - Per thread state (local run queue)
-    - Still have global run queue  
-    ![Distributed Run Queue](https://github.com/mukeshpilaniya/blog/blob/master/_posts/Golang/images/distributed_queue.gif?raw=true)
-    
-   > What is the next goroutine to run ?  
-  
-   Go schedular will check in this order to pick next goroutine to execute
-   - Local Run Queue
-   - Global Run Queue
-   - Network Poller
-   - Work Stealing
+    - Still have global run queue 
+
+   ![Distributed Run Queue](/assets/images/distributed_schedular.gif)
+    - Local queue of runnable goroutines, accessed without lock.
+    - Global queue of runnable goroutines, require lock.
 
    - Conclusion
      - [x] lightweight goroutines
@@ -418,18 +415,89 @@ If there is any operation that should or would affect goroutine execution like g
 
    > If number of thread is more than number of cores than what is the problem ?  
 
-     In distributed run queue schedular we know that each thread is having their own local run queue which contains information about which goroutine going to be execute next. So if the number of threads are greater than number of cores than during the **work stealing** process each thread has to scan all the thread local run queue so if threads are more than thid process is time consuming and the solution is not efficent so we need to limit thread scanning to a constant which is solve using M:P:N threading model.
+     In distributed run queue schedular we know that each thread is having their own local run queue which contains information about which goroutine going to be execute next.Also due to syscall, number of thread will increase and most of time their local run queue is empty. So if the number of threads are greater than number of cores than during the **work stealing** process each thread has to scan all the thread local run queue and most of time they are empty so if threads are more than this process is time consuming and the solution is not efficent so we need to limit thread scanning to a constant which is solve using M:P:N threading model.
 
 6. M:P:N Threading  
    - P represented Processor that are resource required to run the go code.
+      <details open>
+        <summary>Processor Struct Details</summary>
+        <br>
+        https://github.com/golang/go/blob/63e129ba1c458db23f0752d106ed088a2cf38360/src/runtime/runtime2.go#L601
+      </details>
+   - M represented worker thread, or machine.
+      <details open>
+          <summary>Machine Thread Struct Details</summary>
+          <br>
+          https://github.com/golang/go/blob/63e129ba1c458db23f0752d106ed088a2cf38360/src/runtime/runtime2.go#L519
+        </details>
+   - G represented goroutine. 
+        <details open>
+          <summary>Goroutine Struct Details</summary>
+          <br>
+          https://github.com/golang/go/blob/63e129ba1c458db23f0752d106ed088a2cf38360/src/runtime/runtime2.go#L407
+        </details>
    - Generally number of processor is same as number of **logical Processor**.
-   - Processor are created before starting of the main go routine. 
+   - Processors are created before starting of the main go routine.
+   > **How to check number of logical processors ?**
+
+   ```go
+    package main
+
+    import (  
+        "fmt"
+        "runtime"
+    )
+
+    func main() {
+        fmt.Println(runtime.NumCPU())
+    }
+   ```
+
+   - Distributed M:P:N Schedular
+
+   ![Distributed Schedular](/assets/images/distributed_processor_schedular.gif)
+
+   - During the syscall operation handoff of logical processor is performed.
+    https://github.com/golang/go/blob/master/src/runtime/proc.go#L1486
+   
+   ![System call operation](/assets/images/distributed_schedular_during_system_call.gif)
+
    - During the work stealing only fixed number number of queue has to be scan because number of logical processors are limited.
-   - `work stealing`
-   - `photo`  
+   
+   > **What is the next goroutine to run ?**  
+  
+   Go schedular will check in following order to pick next goroutine to execute
+   - <details open>
+        <summary>Local Run Queue</summary>
+        <br>
+        https://github.com/golang/go/blob/67d85ad00f9d9be0cc2bb1bb96d01c3d40dcb376/src/runtime/proc.go#L5981
+      </details>
+    ![Local run queue](/assets/images/distributed_processor_schedular.gif)
+   - <details open>
+        <summary>Global Run Queue</summary>
+        <br>
+        https://github.com/golang/go/blob/67d85ad00f9d9be0cc2bb1bb96d01c3d40dcb376/src/runtime/proc.go#L5662
+      </details>
+    ![local run queue](/assets/images/distributed_schedular_during_empty_local_run_queue.gif)
+   - <details open>
+        <summary>Network poller</summary>
+        <br>
+        https://github.com/golang/go/blob/67d85ad00f9d9be0cc2bb1bb96d01c3d40dcb376/src/runtime/netpoll_aix.go#L154
+      </details>
+    ![Global run queue](/assets/images/distributed_schedular_during_empty_global_run_queue.gif)
+   - <details open>
+        <summary>Work Stealing</summary>
+        <br>
+        https://github.com/golang/go/blob/67d85ad00f9d9be0cc2bb1bb96d01c3d40dcb376/src/runtime/proc.go#L2942
+      </details>
+    ![net poller](/assets/images/distributed_schedular_during_empty_net_poller_ready_run_queue.gif)
+
    - Conclusion
      - [x] lightweight goroutines
      - [x] handling of IO and System calls
      - [x] Parallel execution of goroutines
      - [x] Scalable 
      - [x] Efficient/Work stealing
+
+7. Future Work
+   - FIFO is Bad for locality principle
