@@ -386,9 +386,19 @@ If there is any operation that should or would affect goroutine execution like g
 
    > **How many kernel thread OS can supports ?**
 
+      In Linux Kernel this parameter is defined in the file /proc/sys/kernel/threads-max which is specific to perticular kernel.
+       
+      `sh:~$ cat /proc/sys/kernel/threads-max 94751`  
+      Here, the output 94751 indicates that the kernel can execute a maximum of 94751 threads.
    > **How many goroutine per program Go can support ?**
-
+      
+      There is no restriction built into the schedular for the number of goroutines.
    > **How many kernel thread per program GO can support ?**
+      
+      The runtime limits each program to a maximum of 10,000
+threads by default. This value can be changed by calling the SetMaxThreads function
+from the runtime/debug package. 
+      https://github.com/golang/go/blob/67d85ad00f9d9be0cc2bb1bb96d01c3d40dcb376/src/runtime/proc.go#L686
 
    - Conclusion
      - Number of kernel thread can be more than number of core. #kernel Thread >#Core
@@ -437,6 +447,7 @@ If there is any operation that should or would affect goroutine execution like g
           https://github.com/golang/go/blob/63e129ba1c458db23f0752d106ed088a2cf38360/src/runtime/runtime2.go#L407
         </details>
    - Generally number of processor is same as number of **logical Processor**.
+   - **Logical Processor** is not same as **physical processor**.
    - Processors are created before starting of the main go routine.
    > **How to check number of logical processors ?**
 
@@ -499,5 +510,17 @@ If there is any operation that should or would affect goroutine execution like g
      - [x] Scalable 
      - [x] Efficient/Work stealing
 
-7. Future Work
+7. Limitations of Go schedular
    - FIFO is Bad for locality principle
+   - No notion of goroutine priorities (unlike linux kernel)
+   - No strong preemption -> no strong fairness or latency guarantees.
+   - It's not aware of the system topology -> no real locality. There is an old NUMA-aware scheduler proposal. Also a suggestion to use LIFO queue so its more likely to have data in that CPU cores cache.
+
+
+### References
+  - https://medium.com/@ankur_anand/illustrated-tales-of-go-runtime-scheduler-74809ef6d19b
+  - https://www.morsmachine.dk/go-scheduler
+  - https://go.dev/src/runtime/proc.go
+  - Scalable Go Scheduler Design Doc  
+  - Analysis of the Go runtime scheduler
+  - Go scheduler: Implementing language with lightweight concurrency 
