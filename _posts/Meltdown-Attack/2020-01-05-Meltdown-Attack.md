@@ -4,7 +4,7 @@ Github:- [https://github.com/mukeshpilaniya/meltdown](https://github.com/mukeshp
     <h1><b>International Institute of Information Technology(IIIT), Bangalore</b></h1>
 </p>
 <p align="center">
-  <img src="https://www.iiitb.ac.in/includefiles/userfiles/images/iiitb_logo.png" width="150" height="120" >
+  <img src="https://www.iiitb.ac.in/includefiles/userfiles/images/iiitb_logo.png" width="150" height="120" alt="IIIT Bangalore logo">
 </p>
 <p>
   <p align="center">
@@ -93,7 +93,7 @@ help of page table. L1 cache is nearest to the CPU and split between a data and 
 tion cache. If the data not found in L1 cache than load instruction passed to the next Cache
 hierarchy. This is the point where the page table come into play. Page table are used to
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.004.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.004.png" alt="Figure 1: Cache Architecture"></p>
 
 ```
 Figure 1: Cache Architecture
@@ -115,7 +115,7 @@ unavailability. A processor will execute the instruction order of availability o
 this, the CPU will avoid being idle or free while data is retrieved for the next instruction in advance for a program.(4)(9) Out-of-Order Execution can be regarded asA Room guarded by a Security Officer.The attacker wants to enter the room to get some secret value but the Security Guard have 2 options either it can allow the attacker to access the data depending on the permissions or
 it can deny the attacker to access the room’s data.(4)(9)
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.005.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.005.png" alt="Figure 2: Out-Of-Order Execution"></p>
 ```
 Figure 2: Out-Of-Order Execution
 ```
@@ -162,7 +162,7 @@ In this section we describe each step that need to done for performing meltdown 
 
 For setting up our lab environment we are using 64-bit ubuntu 16.04 LTS in oracle virtual box 6.0, setting related to hardware device is specified in given 3.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.006.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.006.png" alt="Figure 3: Environment Setting"></p>
 
 ```
 Figure 3: Environment Setting
@@ -184,13 +184,13 @@ gcc -march=native -o CacheTime CacheTime.c
 ```
 In the Figure 4 at line number 19, first we have initialized an array of size 10*PAZESIZE.For finding PAGESIZE run the following command in terminal “getconf PAGESIZE” and put your own PAGESIZE in line 8. After that we flush the array address to make sure that array indexes are not cached and in the next phase, we are accessing index 4 and 7 as shown in line number 25 and 26 so that index 4 and 7 is cached by cache. From line number 29 to 35 we are accessing the array index and measuring the timing using rdtscp time stamp.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.007.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.007.png" alt="Figure 4: Program Illustrating the Timing Difference of Probing Array"></p>
 ```
 Figure 4: Program Illustrating the Timing Difference of Probing Array
 ```
 Figure 5 illustrate the timing difference where accessing the array index 3 and 7 is much faster than others.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.008.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.008.png" alt="Figure 5: Access Timing of Probing Array"></p>
 
 ```
 Figure 5: Access Timing of Probing Array
@@ -202,7 +202,7 @@ retrieving secret value is Flush(line 16)+Reload(line27) Functions.
 
 As Shown in Figure 6 at line 14, first we set one-byte secretValue variable equal to 105.Since for a one-byte secret value there are 256 possibilities so in line 12 we declare array of size 256*PAGESIZE. We multiply by PAGESIZE because caching is done at a block level, not at a byte level so, if one byte is cached by cpu than adjacent byte will also cached. Since the first array[0*PAGESIZE] may also cached by some cache block as a default behavior of cache. Therefore, to make sure array[0*PAGESIZE] will not cached we are accessing array[i*PAGESIZE+DELTA], where DELTA is a constant define in line number 10.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.009.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.009.png" alt="Figure 6: Program showing Cache is used as a Side Channel"></p>
 ```
 Figure 6: Program showing Cache is used as a Side Channel
 ```
@@ -210,7 +210,7 @@ Figure 6: Program showing Cache is used as a Side Channel
 First Flush the entire array using flushSideChannel(); from the cache memory to make sure that array is not cached. After that we invoke the victim(); function, which access of the array element based on the value of secret, that array index value is cached by the cache memory. And the final step is calling the reloadSideChannel(); function which reload the entire array and measure the time it takes to reload each element. So, if the array index is previously cached than it requires less CPU cycle. The output of the program illustrates in Figure 7.
 The output of the program shown in fig 6 below:
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.010.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.010.png" alt="Figure 7: Reading of Secret Value from Cache"></p>
 ```
 Figure 7: Reading of Secret Value from Cache
 ```
@@ -218,7 +218,7 @@ Figure 7: Reading of Secret Value from Cache
 
 For preparing meltdown attack we have to placed secret value in kernel space and we show that how a user-level program can access that data without going into kernel space. To store the Secret value in kernel space we are using kernel Module approach and the code is listed in 8.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.011.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.011.png" alt="Figure 8: Program illustrating Meltdown Attack"></p>
 ```
 Figure 8: Program illustrating Meltdown Attack
 ```
@@ -230,7 +230,7 @@ For executing the meltdown attack first, we need to know address of secret value
  3. Print secret value address<br>
  ``dmesg``
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.012.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.012.png" alt="Figure 9: dmesg command"></p>
 ```
 Figure 9: dmesg command
 ```
@@ -238,14 +238,14 @@ Figure 9: dmesg command
 
 When user program tries to access kernel memory in Figure 10 at line 23 than memory access violation is triggered and segmentation fault is generated. To avoid segmentation fault, we are using `SIGSEGV` signal because c does not provide try/catch techniques like java. So to implement try/catch in c we are using `sigsetjmp()` at line 21 and `siglongjmp` at line 10.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.013.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.013.png" alt="Figure 10: Exception Handling"></p>
 ```
 Figure 10: Exception Handling
 ```
 The execution of this program is quite complex but let’s understand it line by line. First,we register a SIGSEGV signal handler in line 19 which will invoke catchsegv function (line7). once’s the signal handler complete processing it let the program to continue its execution so for that we have to define a checkpoint that we are achieve by sigsetjmp(buffer,1) at line 21. sigsetjmp save the stack context in buffer that it latter used by siglongjmp (line 10).
 siglongjmp rollback the stack context in buffer and return the second argument which is 1 so the program execution is start form else part (line 29), output is illustrate in 11.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.014.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.014.png" alt="Figure 11: Output of Exception Handling Program"></p>
 ```
 Figure 11: Output of Exception Handling Program
 ```
@@ -255,7 +255,7 @@ Meltdown is a race condition vulnerability, which involves racing between out-of
 condition. To win race condition we have to keep CPU execution busy somehow and for
 that we are using assembly level code.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.015.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.015.png" alt="Figure 12: Out-of-Order Execution"></p>
 ```
 Figure 12: Out-of-Order Execution
 ```
@@ -271,11 +271,11 @@ shown in Figure 13 at line 92. This step is combination of all step that are des
 after running multiple times the highest value of score array is our answer. The output of
 this step is illustrated in Figure 14.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.016.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.016.png" alt="Figure 13: Reading Secret Value from Kernel"></p>
 ```
 Figure 13: Reading Secret Value from Kernel
 ```
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.017.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.017.png" alt="Figure 14: Output of Program Reading Secret Value from Kernel"></p>
 ```
 Figure 14: Output- Program Reading Secret Value from Kernel
 ```
@@ -297,7 +297,7 @@ is a counter measure to Meltdown Attack. KAISER hide the kernel space from user 
 using randomization technique. KAISER allow the kernel to randomize the kernel location
 at boot time. The Output of same program after applying KAISER patch is illustrated in Figure 15.
 
-<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.018.png"></p>
+<p align="center"> <img src="https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/_posts/Meltdown-Attack/images/images.018.png" alt="Figure 15: KAISER PATCH"></p>
 ```
 Figure 15: KAISER PATCH
 ```
@@ -319,7 +319,7 @@ Address Space Layout Randomization) but it also prevents Meltdown.
   [https://blog.csdn.net/zheng_zmy/article/details/](https://blog.csdn.net/zheng_zmy/article/details/)
 
 [2] Wenliang Du, Syracuse University(2018)Meltdown Attack Lab
-  [http://www.cis.syr.edu/~wedu/seed/Labs_16.04/System/Meltdown_Attack](http://www.cis.syr.edu/~wedu/seed/Labs_16.04/System/Meltdown_Attack)
+  [https://www.cis.syr.edu/~wedu/seed/Labs_16.04/System/Meltdown_Attack](https://www.cis.syr.edu/~wedu/seed/Labs_16.04/System/Meltdown_Attack)
 
 [3] Areej(2020) -Difference between l1 l2 and l3 cache memory
 
@@ -343,4 +343,4 @@ Flush+Flush:A Fast and Stealthy Cache Attack
   [https://cryptome.org/2018/01/spectre-meltdown.pdf](https://cryptome.org/2018/01/spectre-meltdown.pdf)
 
 [10] Yinqian Zhang Cache Side Channels: State of the Art and Research Oppor tunities
-  [http://web.cse.ohio-state.edu/~zhang.834/slides/tutorial17.pdf](http://web.cse.ohio-state.edu/~zhang.834/slides/tutorial17.pdf)
+  [https://web.cse.ohio-state.edu/~zhang.834/slides/tutorial17.pdf](https://web.cse.ohio-state.edu/~zhang.834/slides/tutorial17.pdf)

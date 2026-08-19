@@ -64,7 +64,7 @@ docker pull pilaniya1337/cms
 docker run -t -p 8082:8082 --name cms-springboot --link cms-mysql:mysql -d pilaniya1337/cms
 ```
 ## Working Screenshot
-   Go to:- [http://loaclhost:8082](http://loaclhost:8082)\
+   Go to:- [https://localhost:8082](https://localhost:8082)\
    username- admin\
    password- admin\
    ![ClassRoom-Managament-System](https://raw.githubusercontent.com/mukeshpilaniya/blog/gh-pages/assets/ClassRoom-Management-System/classroom-IIITB.png)

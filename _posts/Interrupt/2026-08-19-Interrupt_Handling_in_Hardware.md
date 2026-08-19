@@ -1,6 +1,6 @@
 ---
 published: true
-categories: [memory]
+categories: [Interrupt]
 tags: [Interrupt Handling in Hardware]
 ---
 # Interrupt Handling in Hardware
