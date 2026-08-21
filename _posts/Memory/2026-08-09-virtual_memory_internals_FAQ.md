@@ -1,4 +1,5 @@
 ---
+title: Virtual Memory FAQ
 published: true
 categories: [memory]
 tags: [virtual memory]

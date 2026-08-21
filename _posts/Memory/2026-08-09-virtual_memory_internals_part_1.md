@@ -1,4 +1,5 @@
 ---
+title: Virtual Memory Internals — Part 1
 published: true
 categories: [memory]
 tags: [virtual memory,page tables]
