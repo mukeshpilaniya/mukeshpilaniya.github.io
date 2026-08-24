@@ -2,7 +2,7 @@
 title: Interrupt Handling in Hardware
 published: true
 categories: [Interrupt]
-tags: [Interrupt Handling in Hardware]
+tags: [interrupt]
 ---
 # Interrupt Handling in Hardware
 
