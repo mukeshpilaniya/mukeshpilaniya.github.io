@@ -16,19 +16,20 @@ This document covers the interrupt control APIs (`local_irq_disable`, `local_irq
 
 1. [Enabling and Disabling Interrupts](#enabling-and-disabling-interrupts)
 2. [The Conceptual Model: What local_irq_disable and local_irq_enable Actually Do](#the-conceptual-model-what-local_irq_disable-and-local_irq_enable-actually-do)
-3. [The Problem That local_irq_save and local_irq_restore Solve](#the-problem-that-local_irq_save-and-local_irq_restore-solve)
-4. [Per-Line Interrupt Control: disable_irq and enable_irq](#per-line-interrupt-control-disable_irq-and-enable_irq)
-5. [What Happens If disable_irq Is Called Twice and enable_irq Only Once](#what-happens-if-disable_irq-is-called-twice-and-enable_irq-only-once)
-6. [What Happens When You Disable a Shared Interrupt Line](#what-happens-when-you-disable-a-shared-interrupt-line)
-7. [Is There an API to Disable All Interrupts on All CPUs](#is-there-an-api-to-disable-all-interrupts-on-all-cpus)
-8. [Process Context vs. Interrupt Context](#process-context-vs-interrupt-context)
-9. [Hardirq Context vs. Softirq Context](#hardirq-context-vs-softirq-context)
-10. [The preempt_count Bitfield](#the-preempt_count-bitfield)
-11. [Checking Your Execution Context](#checking-your-execution-context)
-12. [The Value of current Inside an Interrupt Handler](#the-value-of-current-inside-an-interrupt-handler)
-13. [Why You Cannot Sleep in an Interrupt Handler](#why-you-cannot-sleep-in-an-interrupt-handler)
-14. [The Per-CPU IRQ Stack on AArch64](#the-per-cpu-irq-stack-on-aarch64)
-15. [Summary](#summary)
+3. [Why local_irq_enable Cannot Re-Enable a Per-Line Disabled IRQ](#why-local_irq_enable-cannot-re-enable-a-per-line-disabled-irq)
+4. [The Problem That local_irq_save and local_irq_restore Solve](#the-problem-that-local_irq_save-and-local_irq_restore-solve)
+5. [Per-Line Interrupt Control: disable_irq and enable_irq](#per-line-interrupt-control-disable_irq-and-enable_irq)
+6. [What Happens If disable_irq Is Called Twice and enable_irq Only Once](#what-happens-if-disable_irq-is-called-twice-and-enable_irq-only-once)
+7. [What Happens When You Disable a Shared Interrupt Line](#what-happens-when-you-disable-a-shared-interrupt-line)
+8. [Is There an API to Disable All Interrupts on All CPUs](#is-there-an-api-to-disable-all-interrupts-on-all-cpus)
+9. [Process Context vs. Interrupt Context](#process-context-vs-interrupt-context)
+10. [Hardirq Context vs. Softirq Context](#hardirq-context-vs-softirq-context)
+11. [The preempt_count Bitfield](#the-preempt_count-bitfield)
+12. [Checking Your Execution Context](#checking-your-execution-context)
+13. [The Value of current Inside an Interrupt Handler](#the-value-of-current-inside-an-interrupt-handler)
+14. [Why You Cannot Sleep in an Interrupt Handler](#why-you-cannot-sleep-in-an-interrupt-handler)
+15. [The Per-CPU IRQ Stack on AArch64](#the-per-cpu-irq-stack-on-aarch64)
+16. [Summary](#summary)
 
 ---
 
@@ -270,6 +271,111 @@ What you observe when this module loads:
 - For 10 seconds, **only this CPU** is deaf to hardware interrupts. On a multiprocessor system, other CPUs continue normally — timer ticks, network interrupts, and disk I/O still arrive on other CPUs.
 - After `local_irq_enable()`, the CPU immediately processes any interrupts that became pending during the disabled window (the GIC held them; they were not lost).
 - `mdelay()` is a busy-wait (polling a hardware timer), not a sleep — it does not call `schedule()`, so it is legal in this context. However, 10 seconds is absurdly long for a critical section and would cause real system problems.
+
+---
+
+## Why local_irq_enable Cannot Re-Enable a Per-Line Disabled IRQ
+
+A natural question arises: if `local_irq_enable()` unconditionally enables interrupts on the local CPU, does it also re-enable an IRQ line that was previously disabled via `disable_irq()`? For example, if a driver called `disable_irq(42)` to suppress a specific interrupt, and then some other code path calls `local_irq_enable()` — does IRQ 42 start firing again?
+
+**No.** These two APIs operate on **completely different hardware registers** at different stages of the interrupt delivery pipeline. `local_irq_enable()` cannot re-enable an IRQ that was disabled via `disable_irq()`.
+
+### What local_irq_enable() Actually Writes
+
+Tracing the call chain through the kernel source:
+
+```
+local_irq_enable()
+  → raw_local_irq_enable()              include/linux/irqflags.h:233
+    → arch_local_irq_enable()           arch/arm64/include/asm/irqflags.h:43
+
+    DAIF path (standard):
+      asm volatile("msr daifclr, #3")   arch/arm64/include/asm/irqflags.h:26
+      ─── clears PSTATE.I and PSTATE.F ───
+      This is a CPU-private processor state register.
+      Each CPU has its own PSTATE. No bus transaction, no MMIO write.
+
+    PMR path (pseudo-NMI systems):
+      write_sysreg_s(GIC_PRIO_IRQON, SYS_ICC_PMR_EL1)
+                                        arch/arm64/include/asm/irqflags.h:38
+      ─── writes 0xe0 to the GIC CPU Interface priority mask ───
+      This is a per-CPU system register (ICC_PMR_EL1), not the Distributor.
+```
+
+Both paths write to a **CPU-local register only** — either the CPU's own PSTATE or the per-CPU GIC CPU Interface PMR. Neither path issues any write to the GIC Distributor.
+
+### What disable_irq() Actually Writes
+
+```
+disable_irq(42)
+  → __disable_irq(desc)                 kernel/irq/manage.c:675
+    if (!desc->depth++)                  first disable only
+      → irq_disable(desc)              kernel/irq/chip.c:397
+        → __irq_disable(desc, ...)     kernel/irq/chip.c:361
+          → mask_irq(desc)             kernel/irq/chip.c:432
+            → chip->irq_mask()
+              = gic_mask_irq()          drivers/irqchip/irq-gic-v3.c:486
+                → gic_poke_irq(d, GICD_ICENABLER)
+                  → writel_relaxed(mask, base + offset)
+                                        ^^^^^^^^^^^^^^^^^^
+                    GICD_ICENABLER (offset 0x0180) — GIC Distributor register.
+                    Clears the enable bit for IRQ 42 specifically.
+```
+
+The GICv3 `irq_chip` structure at [drivers/irqchip/irq-gic-v3.c, line 1510](https://github.com/torvalds/linux/blob/v7.2-rc5/drivers/irqchip/irq-gic-v3.c#L1510) has **no `.irq_disable` callback** — it only provides `.irq_mask = gic_mask_irq`. So `irq_disable()` in the generic layer falls through to `mask_irq()`, which calls `gic_mask_irq()`, which writes to the GIC Distributor's `GICD_ICENABLER` register via an MMIO write (`writel_relaxed`).
+
+Similarly, `enable_irq(42)` ends up calling `gic_unmask_irq()`, which writes to `GICD_ISENABLER` (offset `0x0100`) — the Distributor's Set-Enable Register.
+
+### Two Independent Gates in the Hardware
+
+An interrupt must pass through **two independent gates** to reach the CPU. Each gate is controlled by a different register, written by a different API, via a different instruction type:
+
+```
+ Device asserts IRQ 42
+         │
+         ▼
+ ┌────────────────────────────────────────────────────────────────────┐
+ │  GATE 1: GIC Distributor                                          │
+ │                                                                    │
+ │  Register: GICD_ISENABLER / GICD_ICENABLER (offset 0x0100/0x0180) │
+ │  Written by: disable_irq(42) / enable_irq(42)                    │
+ │  Instruction: writel_relaxed() — MMIO store to Distributor MMIO   │
+ │  Scope: controls ONE specific IRQ line across ALL CPUs             │
+ │                                                                    │
+ │  Is the enable bit for IRQ 42 set?                                │
+ ├──────────┬─────────────────────────────────────────────────────────┘
+           Yes                          No → IRQ stays pending at GIC
+            │                                 Distributor, never forwarded
+            ▼                                 to any CPU
+ ┌────────────────────────────────────────────────────────────────────┐
+ │  GATE 2: CPU Exception Mask                                       │
+ │                                                                    │
+ │  Register: PSTATE.I (DAIF bit 7) or ICC_PMR_EL1                   │
+ │  Written by: local_irq_disable() / local_irq_enable()            │
+ │  Instruction: msr daifset/daifclr — system register, no MMIO     │
+ │  Scope: controls ALL interrupts on THIS CPU only                  │
+ │                                                                    │
+ │  Is the CPU accepting interrupt exceptions?                       │
+ ├──────────┬─────────────────────────────────────────────────────────┘
+           Yes                          No → IRQ stays pending at CPU,
+            │                                 delivered when PSTATE.I
+            ▼                                 is cleared
+      Handler runs
+```
+
+Both gates must be open for an interrupt to be delivered. `local_irq_enable()` only opens Gate 2 (clears PSTATE.I). It **cannot** open Gate 1 — that requires `enable_irq(42)` to write `GICD_ISENABLER` via an MMIO store to the GIC Distributor.
+
+### Summary Table
+
+| | `local_irq_disable/enable` | `disable_irq/enable_irq` |
+|---|---|---|
+| **Hardware register** | CPU PSTATE (DAIF bits) or ICC_PMR_EL1 | GIC Distributor GICD_ICENABLER / GICD_ISENABLER |
+| **Instruction type** | `msr` (system register) | `writel_relaxed` (MMIO store) |
+| **Scope** | All interrupts on this CPU | One IRQ line across all CPUs |
+| **Granularity** | All-or-nothing per CPU | Per-IRQ-line |
+| **Can affect the other's register?** | No | No |
+
+The two mechanisms are **architecturally independent**. `local_irq_enable()` writing to PSTATE has no side effect on the GIC Distributor's enable registers, and `enable_irq()` writing to the Distributor has no side effect on any CPU's PSTATE. They are different registers, accessed by different instructions, at different levels of the interrupt hardware.
 
 ---
 
@@ -888,6 +994,8 @@ The locking choice follows directly from the context table:
 - **Data shared between hardirq and softirq** → `spin_lock()` / `spin_unlock()` in the hardirq handler (interrupts are already disabled), and `spin_lock_irqsave()` / `spin_unlock_irqrestore()` in the softirq handler (need to disable interrupts to prevent hardirq preemption).
 
 - **Data accessed only from softirq context (same type)** → No lock needed if the softirq only runs on one CPU at a time. But different softirq types can run concurrently on different CPUs, so data shared between softirq types needs `spin_lock()`.
+
+The reasoning behind each choice — why a plain `spin_lock()` deadlocks when data is shared with an interrupt handler — is explained in detail in `part3_doc_part4.md`, section "Why Each Spinlock Variant Exists: The Same-CPU Deadlock."
 
 ---
 
