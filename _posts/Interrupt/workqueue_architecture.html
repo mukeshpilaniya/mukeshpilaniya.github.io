@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux Kernel Workqueue Architecture (cmwq)</title>
+<style>
+  /* ── Palette: validated categorical (6 slots) ── */
+  :root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-2:      #232322;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+
+    /* categorical slots – dark mode */
+    --cat-driver:     #3987e5;   /* blue – driver / subsystem code */
+    --cat-workqueue:  #d95926;   /* orange – workqueue_struct */
+    --cat-pwq:        #199e70;   /* aqua – pool_workqueue bridge */
+    --cat-pool:       #c98500;   /* yellow – worker_pool */
+    --cat-worker:     #d55181;   /* magenta – worker / kworker */
+    --cat-work:       #008300;   /* green – work_struct */
+
+    /* fills at ~15% opacity */
+    --fill-driver:    rgba(57,135,229,0.15);
+    --fill-workqueue: rgba(217,89,38,0.15);
+    --fill-pwq:       rgba(25,158,112,0.15);
+    --fill-pool:      rgba(201,133,0,0.15);
+    --fill-worker:    rgba(213,81,129,0.15);
+    --fill-work:      rgba(0,131,0,0.15);
+  }
+
+  [data-theme="light"] {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f4f4f2;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+
+    --cat-driver:     #2a78d6;
+    --cat-workqueue:  #eb6834;
+    --cat-pwq:        #1baf7a;
+    --cat-pool:       #eda100;
+    --cat-worker:     #e87ba4;
+    --cat-work:       #008300;
+
+    --fill-driver:    rgba(42,120,214,0.12);
+    --fill-workqueue: rgba(235,104,52,0.12);
+    --fill-pwq:       rgba(27,175,122,0.12);
+    --fill-pool:      rgba(237,161,0,0.12);
+    --fill-worker:    rgba(232,123,164,0.12);
+    --fill-work:      rgba(0,131,0,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  .header {
+    max-width: 1200px;
+    margin: 0 auto 24px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .header .subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .theme-toggle {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    border: 1px solid var(--gridline);
+    border-radius: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { border-color: var(--baseline); }
+
+  /* ── Legend ── */
+  .legend {
+    max-width: 1200px;
+    margin: 0 auto 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: default;
+  }
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  /* ── Main SVG container ── */
+  .viz-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: var(--surface-2);
+    border: 1px solid var(--gridline);
+    border-radius: 8px;
+    overflow-x: auto;
+    padding: 16px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* ── SVG styles ── */
+  .node-rect {
+    rx: 6;
+    ry: 6;
+    stroke-width: 1.5;
+    cursor: pointer;
+    transition: filter 0.15s;
+  }
+  .node-rect:hover { filter: brightness(1.15); }
+
+  .node-label {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 12px;
+    fill: var(--text-primary);
+    pointer-events: none;
+    font-weight: 600;
+  }
+  .node-sublabel {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 10px;
+    fill: var(--text-secondary);
+    pointer-events: none;
+  }
+  .node-detail {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 9.5px;
+    fill: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .section-label {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 11px;
+    fill: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .flow-arrow {
+    stroke-width: 1.5;
+    fill: none;
+    marker-end: url(#arrowhead);
+  }
+  .flow-arrow-thick {
+    stroke-width: 2;
+    fill: none;
+    marker-end: url(#arrowhead-thick);
+  }
+
+  .connector {
+    stroke: var(--baseline);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    fill: none;
+  }
+
+  .section-bg {
+    rx: 8;
+    ry: 8;
+  }
+
+  /* ── Tooltip ── */
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--gridline);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    max-width: 340px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.12s;
+    line-height: 1.5;
+  }
+  .tooltip.visible { opacity: 1; }
+  .tooltip-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tooltip-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .tooltip-struct {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .tooltip-body {
+    color: var(--text-secondary);
+  }
+
+  /* ── Table view toggle ── */
+  .table-toggle {
+    max-width: 1200px;
+    margin: 16px auto 0;
+    text-align: right;
+  }
+  .table-toggle button {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--gridline);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .table-toggle button:hover { border-color: var(--baseline); }
+
+  .table-view {
+    max-width: 1200px;
+    margin: 12px auto 0;
+    display: none;
+    border: 1px solid var(--gridline);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .table-view.visible { display: block; }
+  .table-view table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .table-view th {
+    background: var(--surface-2);
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--gridline);
+  }
+  .table-view td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--gridline);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+  .table-view tr:last-child td { border-bottom: none; }
+  .table-view .swatch-cell {
+    width: 24px;
+  }
+  .table-view .swatch-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+  .table-view code {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11px;
+    background: var(--surface-1);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="header">
+  <div>
+    <h1>Linux Kernel Workqueue Architecture (cmwq)</h1>
+    <div class="subtitle">Concurrency Managed Workqueues — v7.2-rc5 · kernel/workqueue.c</div>
+  </div>
+  <button class="theme-toggle" onclick="toggleTheme()">Toggle light/dark</button>
+</div>
+
+<div class="legend" role="list" aria-label="Component legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-driver)"></div>Driver / Subsystem</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-work)"></div>work_struct</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-workqueue)"></div>workqueue_struct</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-pwq)"></div>pool_workqueue (pwq)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-pool)"></div>worker_pool</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--cat-worker)"></div>worker (kworker)</div>
+</div>
+
+<div class="viz-container">
+<svg viewBox="0 0 1160 920" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Workqueue architecture diagram showing how work items flow from driver code through workqueues, pool_workqueue bridges, worker pools, to kworker threads">
+
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--text-muted)" stroke-width="1.2"/>
+    </marker>
+    <marker id="arrowhead-thick" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7" fill="none" stroke="var(--cat-pwq)" stroke-width="1.5"/>
+    </marker>
+    <marker id="arrowhead-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--cat-driver)" stroke-width="1.2"/>
+    </marker>
+  </defs>
+
+  <!-- ════════════ LAYER 1: DRIVER CODE ════════════ -->
+  <text x="24" y="28" class="section-label">Layer 1 — Driver / Subsystem Code</text>
+
+  <rect x="24" y="40" width="1112" height="80" fill="var(--fill-driver)" stroke="var(--cat-driver)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- Driver struct -->
+  <rect x="48" y="52" width="240" height="56" fill="var(--surface-1)" stroke="var(--cat-driver)" class="node-rect"
+        data-tooltip="driver-struct"/>
+  <text x="168" y="73" text-anchor="middle" class="node-label">struct my_device</text>
+  <text x="168" y="88" text-anchor="middle" class="node-sublabel">Driver's private structure</text>
+  <text x="168" y="100" text-anchor="middle" class="node-detail">Contains embedded work_struct(s)</text>
+
+  <!-- INIT_WORK -->
+  <rect x="320" y="52" width="180" height="56" fill="var(--surface-1)" stroke="var(--cat-driver)" class="node-rect"
+        data-tooltip="init-work"/>
+  <text x="410" y="73" text-anchor="middle" class="node-label">INIT_WORK()</text>
+  <text x="410" y="88" text-anchor="middle" class="node-sublabel">Initialize work_struct</text>
+  <text x="410" y="100" text-anchor="middle" class="node-detail">data=0, entry=empty, func=handler</text>
+
+  <!-- queue_work call -->
+  <rect x="532" y="52" width="220" height="56" fill="var(--surface-1)" stroke="var(--cat-driver)" class="node-rect"
+        data-tooltip="queue-work-call"/>
+  <text x="642" y="73" text-anchor="middle" class="node-label">queue_work(wq, &work)</text>
+  <text x="642" y="88" text-anchor="middle" class="node-sublabel">Submit work to workqueue</text>
+  <text x="642" y="100" text-anchor="middle" class="node-detail">or schedule_work() for system_percpu_wq</text>
+
+  <!-- handler -->
+  <rect x="784" y="52" width="220" height="56" fill="var(--surface-1)" stroke="var(--cat-driver)" class="node-rect"
+        data-tooltip="handler"/>
+  <text x="894" y="73" text-anchor="middle" class="node-label">my_handler(work)</text>
+  <text x="894" y="88" text-anchor="middle" class="node-sublabel">Work handler function</text>
+  <text x="894" y="100" text-anchor="middle" class="node-detail">Runs in process context, can sleep</text>
+
+  <!-- Flow: struct → INIT → queue_work -->
+  <path d="M288,80 L320,80" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M500,80 L532,80" class="flow-arrow" stroke="var(--text-muted)"/>
+
+  <!-- ════════════ LAYER 2: WORK ITEMS ════════════ -->
+  <text x="24" y="152" class="section-label">Layer 2 — Work Items (struct work_struct)</text>
+
+  <rect x="24" y="164" width="1112" height="80" fill="var(--fill-work)" stroke="var(--cat-work)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- work_struct A -->
+  <rect x="120" y="176" width="200" height="56" fill="var(--surface-1)" stroke="var(--cat-work)" class="node-rect"
+        data-tooltip="work-struct"/>
+  <text x="220" y="197" text-anchor="middle" class="node-label">work_struct A</text>
+  <text x="220" y="212" text-anchor="middle" class="node-sublabel">func = handler_a</text>
+  <text x="220" y="224" text-anchor="middle" class="node-detail">PENDING=1 when queued</text>
+
+  <!-- work_struct B -->
+  <rect x="360" y="176" width="200" height="56" fill="var(--surface-1)" stroke="var(--cat-work)" class="node-rect"
+        data-tooltip="work-struct"/>
+  <text x="460" y="197" text-anchor="middle" class="node-label">work_struct B</text>
+  <text x="460" y="212" text-anchor="middle" class="node-sublabel">func = handler_b</text>
+  <text x="460" y="224" text-anchor="middle" class="node-detail">PENDING=1 when queued</text>
+
+  <!-- work_struct C -->
+  <rect x="600" y="176" width="200" height="56" fill="var(--surface-1)" stroke="var(--cat-work)" class="node-rect"
+        data-tooltip="work-struct"/>
+  <text x="700" y="197" text-anchor="middle" class="node-label">work_struct C</text>
+  <text x="700" y="212" text-anchor="middle" class="node-sublabel">func = handler_a</text>
+  <text x="700" y="224" text-anchor="middle" class="node-detail">Same handler, different data</text>
+
+  <!-- work_struct D -->
+  <rect x="840" y="176" width="200" height="56" fill="var(--surface-1)" stroke="var(--cat-work)" class="node-rect"
+        data-tooltip="work-struct"/>
+  <text x="940" y="197" text-anchor="middle" class="node-label">work_struct D</text>
+  <text x="940" y="212" text-anchor="middle" class="node-sublabel">func = handler_c</text>
+  <text x="940" y="224" text-anchor="middle" class="node-detail">Queued on highpri wq</text>
+
+  <!-- Flow arrows from driver to work items -->
+  <path d="M168,108 L220,176" class="flow-arrow" stroke="var(--cat-driver)" marker-end="url(#arrowhead-blue)"/>
+
+  <!-- ════════════ LAYER 3: WORKQUEUES ════════════ -->
+  <text x="24" y="276" class="section-label">Layer 3 — Workqueues (struct workqueue_struct)</text>
+
+  <rect x="24" y="288" width="1112" height="80" fill="var(--fill-workqueue)" stroke="var(--cat-workqueue)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- system_percpu_wq -->
+  <rect x="60" y="300" width="220" height="56" fill="var(--surface-1)" stroke="var(--cat-workqueue)" class="node-rect"
+        data-tooltip="system-percpu-wq"/>
+  <text x="170" y="321" text-anchor="middle" class="node-label">system_percpu_wq</text>
+  <text x="170" y="336" text-anchor="middle" class="node-sublabel">Default per-CPU workqueue</text>
+  <text x="170" y="348" text-anchor="middle" class="node-detail">schedule_work() uses this</text>
+
+  <!-- system_dfl_wq (unbound) -->
+  <rect x="310" y="300" width="200" height="56" fill="var(--surface-1)" stroke="var(--cat-workqueue)" class="node-rect"
+        data-tooltip="system-dfl-wq"/>
+  <text x="410" y="321" text-anchor="middle" class="node-label">system_dfl_wq</text>
+  <text x="410" y="336" text-anchor="middle" class="node-sublabel">"events_unbound"</text>
+  <text x="410" y="348" text-anchor="middle" class="node-detail">WQ_UNBOUND, max_active=512</text>
+
+  <!-- system_highpri_wq -->
+  <rect x="540" y="300" width="220" height="56" fill="var(--surface-1)" stroke="var(--cat-workqueue)" class="node-rect"
+        data-tooltip="system-highpri-wq"/>
+  <text x="650" y="321" text-anchor="middle" class="node-label">system_highpri_wq</text>
+  <text x="650" y="336" text-anchor="middle" class="node-sublabel">High priority work</text>
+  <text x="650" y="348" text-anchor="middle" class="node-detail">WQ_HIGHPRI, nice = -20</text>
+
+  <!-- custom_wq -->
+  <rect x="790" y="300" width="220" height="56" fill="var(--surface-1)" stroke="var(--cat-workqueue)" class="node-rect"
+        data-tooltip="custom-wq"/>
+  <text x="900" y="321" text-anchor="middle" class="node-label">alloc_workqueue("my_wq")</text>
+  <text x="900" y="336" text-anchor="middle" class="node-sublabel">Driver's custom workqueue</text>
+  <text x="900" y="348" text-anchor="middle" class="node-detail">Custom flags, max_active</text>
+
+  <!-- Flow arrows from work items to workqueues -->
+  <path d="M220,232 L170,300" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M460,232 L170,300" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M700,232 L170,300" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M940,232 L650,300" class="flow-arrow" stroke="var(--text-muted)"/>
+
+  <!-- ════════════ LAYER 4: POOL WORKQUEUE (PWQ) BRIDGE ════════════ -->
+  <text x="24" y="400" class="section-label">Layer 4 — pool_workqueue (pwq) — The Bridge</text>
+
+  <rect x="24" y="412" width="1112" height="100" fill="var(--fill-pwq)" stroke="var(--cat-pwq)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- pwq explanation -->
+  <text x="560" y="432" text-anchor="middle" class="node-sublabel" style="font-style: italic;">
+    per_cpu_ptr(wq->cpu_pwq, cpu) → pwq → pwq->pool → worker_pool
+  </text>
+
+  <!-- PWQ CPU 0 -->
+  <rect x="48" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq"/>
+  <text x="128" y="465" text-anchor="middle" class="node-label">pwq [CPU 0]</text>
+  <text x="128" y="480" text-anchor="middle" class="node-sublabel">nr_active: 2</text>
+  <text x="128" y="492" text-anchor="middle" class="node-detail">→ pool(CPU 0, normal)</text>
+
+  <!-- PWQ CPU 1 -->
+  <rect x="228" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq"/>
+  <text x="308" y="465" text-anchor="middle" class="node-label">pwq [CPU 1]</text>
+  <text x="308" y="480" text-anchor="middle" class="node-sublabel">nr_active: 0</text>
+  <text x="308" y="492" text-anchor="middle" class="node-detail">→ pool(CPU 1, normal)</text>
+
+  <!-- PWQ CPU 2 -->
+  <rect x="408" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq"/>
+  <text x="488" y="465" text-anchor="middle" class="node-label">pwq [CPU 2]</text>
+  <text x="488" y="480" text-anchor="middle" class="node-sublabel">nr_active: 1</text>
+  <text x="488" y="492" text-anchor="middle" class="node-detail">→ pool(CPU 2, normal)</text>
+
+  <!-- PWQ CPU 3 -->
+  <rect x="588" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq"/>
+  <text x="668" y="465" text-anchor="middle" class="node-label">pwq [CPU 3]</text>
+  <text x="668" y="480" text-anchor="middle" class="node-sublabel">nr_active: 0</text>
+  <text x="668" y="492" text-anchor="middle" class="node-detail">→ pool(CPU 3, normal)</text>
+
+  <!-- PWQ Highpri -->
+  <rect x="768" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq-highpri"/>
+  <text x="848" y="465" text-anchor="middle" class="node-label">pwq [CPU 0, H]</text>
+  <text x="848" y="480" text-anchor="middle" class="node-sublabel">nr_active: 1</text>
+  <text x="848" y="492" text-anchor="middle" class="node-detail">→ pool(CPU 0, highpri)</text>
+
+  <!-- PWQ Unbound -->
+  <rect x="948" y="444" width="160" height="56" fill="var(--surface-1)" stroke="var(--cat-pwq)" class="node-rect"
+        data-tooltip="pwq-unbound"/>
+  <text x="1028" y="465" text-anchor="middle" class="node-label">pwq [unbound]</text>
+  <text x="1028" y="480" text-anchor="middle" class="node-sublabel">NUMA node 0</text>
+  <text x="1028" y="492" text-anchor="middle" class="node-detail">→ unbound pool</text>
+
+  <!-- Flow from workqueues to pwqs -->
+  <path d="M170,356 L128,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+  <path d="M170,356 L308,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+  <path d="M170,356 L488,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+  <path d="M170,356 L668,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+  <path d="M650,356 L848,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+  <path d="M410,356 L1028,444" class="flow-arrow-thick" stroke="var(--cat-pwq)"/>
+
+  <!-- ════════════ LAYER 5: WORKER POOLS ════════════ -->
+  <text x="24" y="542" class="section-label">Layer 5 — Worker Pools (struct worker_pool)</text>
+
+  <rect x="24" y="554" width="1112" height="120" fill="var(--fill-pool)" stroke="var(--cat-pool)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- Per-CPU pool: CPU 0 normal -->
+  <rect x="40" y="570" width="170" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-percpu-normal"/>
+  <text x="125" y="588" text-anchor="middle" class="node-label">CPU 0 · Normal</text>
+  <text x="125" y="602" text-anchor="middle" class="node-sublabel">nice = 0, nr_running: 1</text>
+  <text x="125" y="616" text-anchor="middle" class="node-detail">worklist → [A] → [B]</text>
+  <text x="125" y="630" text-anchor="middle" class="node-detail">nr_idle: 1, nr_workers: 2</text>
+  <text x="125" y="644" text-anchor="middle" class="node-detail">pool ID: 0</text>
+
+  <!-- Per-CPU pool: CPU 1 normal -->
+  <rect x="228" y="570" width="170" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-percpu-normal"/>
+  <text x="313" y="588" text-anchor="middle" class="node-label">CPU 1 · Normal</text>
+  <text x="313" y="602" text-anchor="middle" class="node-sublabel">nice = 0, nr_running: 0</text>
+  <text x="313" y="616" text-anchor="middle" class="node-detail">worklist → (empty)</text>
+  <text x="313" y="630" text-anchor="middle" class="node-detail">nr_idle: 1, nr_workers: 1</text>
+  <text x="313" y="644" text-anchor="middle" class="node-detail">pool ID: 2</text>
+
+  <!-- Per-CPU pool: CPU 2 normal -->
+  <rect x="416" y="570" width="170" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-percpu-normal"/>
+  <text x="501" y="588" text-anchor="middle" class="node-label">CPU 2 · Normal</text>
+  <text x="501" y="602" text-anchor="middle" class="node-sublabel">nice = 0, nr_running: 1</text>
+  <text x="501" y="616" text-anchor="middle" class="node-detail">worklist → [C]</text>
+  <text x="501" y="630" text-anchor="middle" class="node-detail">nr_idle: 0, nr_workers: 1</text>
+  <text x="501" y="644" text-anchor="middle" class="node-detail">pool ID: 4</text>
+
+  <!-- Per-CPU pool: CPU 3 normal -->
+  <rect x="604" y="570" width="170" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-percpu-normal"/>
+  <text x="689" y="588" text-anchor="middle" class="node-label">CPU 3 · Normal</text>
+  <text x="689" y="602" text-anchor="middle" class="node-sublabel">nice = 0, nr_running: 0</text>
+  <text x="689" y="616" text-anchor="middle" class="node-detail">worklist → (empty)</text>
+  <text x="689" y="630" text-anchor="middle" class="node-detail">nr_idle: 1, nr_workers: 1</text>
+  <text x="689" y="644" text-anchor="middle" class="node-detail">pool ID: 6</text>
+
+  <!-- Per-CPU pool: CPU 0 highpri -->
+  <rect x="792" y="570" width="152" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-percpu-highpri"/>
+  <text x="868" y="588" text-anchor="middle" class="node-label">CPU 0 · Highpri</text>
+  <text x="868" y="602" text-anchor="middle" class="node-sublabel">nice = -20</text>
+  <text x="868" y="616" text-anchor="middle" class="node-detail">worklist → [D]</text>
+  <text x="868" y="630" text-anchor="middle" class="node-detail">nr_idle: 0, nr_workers: 1</text>
+  <text x="868" y="644" text-anchor="middle" class="node-detail">pool ID: 1</text>
+
+  <!-- Unbound pool -->
+  <rect x="962" y="570" width="152" height="92" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="pool-unbound"/>
+  <text x="1038" y="588" text-anchor="middle" class="node-label">Unbound Pool</text>
+  <text x="1038" y="602" text-anchor="middle" class="node-sublabel">NUMA node 0</text>
+  <text x="1038" y="616" text-anchor="middle" class="node-detail">cpumask: {0,1,2,3}</text>
+  <text x="1038" y="630" text-anchor="middle" class="node-detail">Workers can migrate</text>
+  <text x="1038" y="644" text-anchor="middle" class="node-detail">pool ID: 8</text>
+
+  <!-- Flow from pwq to pools -->
+  <path d="M128,500 L125,570" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M308,500 L313,570" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M488,500 L501,570" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M668,500 L689,570" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M848,500 L868,570" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M1028,500 L1038,570" class="flow-arrow" stroke="var(--text-muted)"/>
+
+  <!-- ════════════ LAYER 6: WORKERS ════════════ -->
+  <text x="24" y="698" class="section-label">Layer 6 — Workers (struct worker → kworker threads)</text>
+
+  <rect x="24" y="710" width="1112" height="100" fill="var(--fill-worker)" stroke="var(--cat-worker)" stroke-width="1" class="section-bg" opacity="0.6"/>
+
+  <!-- Workers for CPU 0 normal -->
+  <rect x="40" y="724" width="82" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-busy"/>
+  <text x="81" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/0:0</text>
+  <text x="81" y="758" text-anchor="middle" class="node-detail">BUSY</text>
+  <text x="81" y="770" text-anchor="middle" class="node-detail">executing A</text>
+  <text x="81" y="782" text-anchor="middle" class="node-detail">→ busy_hash</text>
+
+  <rect x="130" y="724" width="82" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-idle"/>
+  <text x="171" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/0:1</text>
+  <text x="171" y="758" text-anchor="middle" class="node-detail">IDLE</text>
+  <text x="171" y="770" text-anchor="middle" class="node-detail">TASK_IDLE</text>
+  <text x="171" y="782" text-anchor="middle" class="node-detail">→ idle_list</text>
+
+  <!-- Workers for CPU 1 -->
+  <rect x="248" y="724" width="130" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-idle"/>
+  <text x="313" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/1:0</text>
+  <text x="313" y="758" text-anchor="middle" class="node-detail">IDLE — no work</text>
+  <text x="313" y="770" text-anchor="middle" class="node-detail">schedule() sleeping</text>
+  <text x="313" y="782" text-anchor="middle" class="node-detail">→ idle_list</text>
+
+  <!-- Workers for CPU 2 -->
+  <rect x="428" y="724" width="130" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-busy"/>
+  <text x="493" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/2:0</text>
+  <text x="493" y="758" text-anchor="middle" class="node-detail">BUSY</text>
+  <text x="493" y="770" text-anchor="middle" class="node-detail">executing C</text>
+  <text x="493" y="782" text-anchor="middle" class="node-detail">nr_idle=0 → may create</text>
+
+  <!-- Workers for CPU 3 -->
+  <rect x="610" y="724" width="130" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-idle"/>
+  <text x="675" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/3:0</text>
+  <text x="675" y="758" text-anchor="middle" class="node-detail">IDLE — no work</text>
+  <text x="675" y="770" text-anchor="middle" class="node-detail">5 min timeout active</text>
+  <text x="675" y="782" text-anchor="middle" class="node-detail">→ idle_list</text>
+
+  <!-- Workers for highpri -->
+  <rect x="794" y="724" width="130" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-highpri"/>
+  <text x="859" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/0:H0</text>
+  <text x="859" y="758" text-anchor="middle" class="node-detail">BUSY (highpri)</text>
+  <text x="859" y="770" text-anchor="middle" class="node-detail">executing D</text>
+  <text x="859" y="782" text-anchor="middle" class="node-detail">nice = -20</text>
+
+  <!-- Workers for unbound -->
+  <rect x="964" y="724" width="130" height="72" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="worker-unbound"/>
+  <text x="1029" y="745" text-anchor="middle" class="node-label" style="font-size:10px">kworker/u8:0</text>
+  <text x="1029" y="758" text-anchor="middle" class="node-detail">IDLE</text>
+  <text x="1029" y="770" text-anchor="middle" class="node-detail">Can run on CPU 0-3</text>
+  <text x="1029" y="782" text-anchor="middle" class="node-detail">CFS load-balanced</text>
+
+  <!-- Flow from pools to workers -->
+  <path d="M125,662 L105,724" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M313,662 L313,724" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M501,662 L493,724" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M689,662 L675,724" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M868,662 L859,724" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M1038,662 L1029,724" class="flow-arrow" stroke="var(--text-muted)"/>
+
+  <!-- ════════════ LAYER 7: EXECUTION ════════════ -->
+  <text x="24" y="838" class="section-label">Execution — process_one_work() → handler runs in process context</text>
+
+  <rect x="24" y="850" width="1112" height="56" fill="var(--fill-driver)" stroke="var(--cat-driver)" stroke-width="1" class="section-bg" opacity="0.4"/>
+
+  <rect x="48" y="858" width="340" height="40" fill="var(--surface-1)" stroke="var(--cat-driver)" class="node-rect"
+        data-tooltip="execution"/>
+  <text x="218" y="878" text-anchor="middle" class="node-label">worker->current_func(work)</text>
+  <text x="218" y="892" text-anchor="middle" class="node-sublabel">Pool lock released · IRQs enabled · Can sleep</text>
+
+  <rect x="420" y="858" width="260" height="40" fill="var(--surface-1)" stroke="var(--cat-pool)" class="node-rect"
+        data-tooltip="concurrency"/>
+  <text x="550" y="878" text-anchor="middle" class="node-label">Concurrency Management</text>
+  <text x="550" y="892" text-anchor="middle" class="node-sublabel">wq_worker_sleeping → wake another if nr_running=0</text>
+
+  <rect x="712" y="858" width="260" height="40" fill="var(--surface-1)" stroke="var(--cat-worker)" class="node-rect"
+        data-tooltip="lifecycle"/>
+  <text x="842" y="878" text-anchor="middle" class="node-label">Worker Lifecycle</text>
+  <text x="842" y="892" text-anchor="middle" class="node-sublabel">Created on demand · Destroyed after 5 min idle</text>
+
+  <!-- Flow from workers to execution -->
+  <path d="M81,796 L218,858" class="flow-arrow" stroke="var(--text-muted)"/>
+  <path d="M493,796 L218,858" class="flow-arrow" stroke="var(--text-muted)"/>
+
+</svg>
+</div>
+
+<div class="table-toggle">
+  <button onclick="toggleTable()">Table view</button>
+</div>
+
+<div class="table-view" id="table-view">
+<table>
+  <thead>
+    <tr>
+      <th class="swatch-cell"></th>
+      <th>Component</th>
+      <th>Kernel Structure</th>
+      <th>Role</th>
+      <th>Key Fields / Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-driver)"></span></td>
+      <td>Driver / Subsystem</td>
+      <td>—</td>
+      <td>Creates and queues work items via <code>INIT_WORK()</code> + <code>queue_work()</code></td>
+      <td>Handler function runs in process context when work executes</td>
+    </tr>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-work)"></span></td>
+      <td>Work Item</td>
+      <td><code>struct work_struct</code></td>
+      <td>Unit of deferred work — a function pointer + metadata</td>
+      <td><code>data</code> (pool/pwq + PENDING bit), <code>entry</code> (list linkage), <code>func</code> (handler)</td>
+    </tr>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-workqueue)"></span></td>
+      <td>Workqueue</td>
+      <td><code>struct workqueue_struct</code></td>
+      <td>Named channel for submitting work — does NOT own threads</td>
+      <td><code>cpu_pwq</code> (per-CPU pwq array), <code>flags</code> (WQ_UNBOUND, WQ_HIGHPRI, etc.), <code>name</code></td>
+    </tr>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-pwq)"></span></td>
+      <td>Pool Workqueue (pwq)</td>
+      <td><code>struct pool_workqueue</code></td>
+      <td>Bridge connecting a workqueue to a worker_pool — holds per-wq-per-pool accounting</td>
+      <td><code>pool</code>, <code>wq</code>, <code>nr_active</code>, <code>inactive_works</code>, <code>max_active</code></td>
+    </tr>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-pool)"></span></td>
+      <td>Worker Pool</td>
+      <td><code>struct worker_pool</code></td>
+      <td>Pool of kworker threads that execute work items — 2 per CPU (normal + highpri) + unbound pools</td>
+      <td><code>worklist</code>, <code>nr_running</code>, <code>nr_idle</code>, <code>busy_hash</code>, <code>idle_list</code>, <code>cpu</code></td>
+    </tr>
+    <tr>
+      <td><span class="swatch-dot" style="background:var(--cat-worker)"></span></td>
+      <td>Worker (kworker)</td>
+      <td><code>struct worker</code></td>
+      <td>Kernel thread that picks work from pool→worklist and calls work→func(work)</td>
+      <td><code>current_work</code>, <code>current_func</code>, <code>task</code>, <code>pool</code>, <code>flags</code> (IDLE/BUSY/DIE)</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="tooltip" id="tooltip">
+  <div class="tooltip-title">
+    <span class="tooltip-swatch" id="tooltip-swatch"></span>
+    <span id="tooltip-title-text"></span>
+  </div>
+  <div class="tooltip-struct" id="tooltip-struct"></div>
+  <div class="tooltip-body" id="tooltip-body"></div>
+</div>
+
+<script>
+const tooltipData = {
+  'driver-struct': {
+    title: 'Driver Private Structure',
+    color: 'var(--cat-driver)',
+    struct: 'struct my_device { struct work_struct work; ... };',
+    body: 'Drivers embed one or more work_struct inside their private data structure. The handler uses container_of() to recover the enclosing structure from the work pointer.'
+  },
+  'init-work': {
+    title: 'INIT_WORK()',
+    color: 'var(--cat-driver)',
+    struct: 'INIT_WORK(&work, handler_fn)',
+    body: 'Pure initialization — sets data=WORK_DATA_INIT (PENDING=0), entry=empty list, func=handler. No locks, no allocations. The work item is dormant until queued.'
+  },
+  'queue-work-call': {
+    title: 'queue_work() / schedule_work()',
+    color: 'var(--cat-driver)',
+    struct: 'queue_work(wq, &work) → queue_work_on() → __queue_work()',
+    body: 'Atomically sets the PENDING bit, looks up the per-CPU pwq, gets the worker_pool from pwq→pool, adds work to pool→worklist via list_add_tail(), then calls kick_pool() to wake an idle kworker.'
+  },
+  'handler': {
+    title: 'Work Handler Function',
+    color: 'var(--cat-driver)',
+    struct: 'void (*work_func_t)(struct work_struct *work)',
+    body: 'Runs in process context with its own task_struct. Can sleep, take mutexes, allocate with GFP_KERNEL. Pool lock is NOT held. Called by worker→current_func(work) inside process_one_work().'
+  },
+  'work-struct': {
+    title: 'Work Item',
+    color: 'var(--cat-work)',
+    struct: 'struct work_struct { atomic_long_t data; struct list_head entry; work_func_t func; }',
+    body: 'The unit of deferred work. data encodes the PENDING bit (bit 0) + pwq pointer (when queued) or pool ID (when off-queue). entry links into pool→worklist. func points to the handler. PENDING=1 prevents double-queueing.'
+  },
+  'system-percpu-wq': {
+    title: 'system_percpu_wq',
+    color: 'var(--cat-workqueue)',
+    struct: 'extern struct workqueue_struct *system_percpu_wq;',
+    body: 'The default per-CPU system workqueue. schedule_work() is a wrapper for queue_work(system_percpu_wq, &work). Work stays on the CPU where it was queued. Normal priority (nice=0). Per-CPU pwqs point to the per-CPU normal pool.'
+  },
+  'system-dfl-wq': {
+    title: 'system_dfl_wq ("events_unbound")',
+    color: 'var(--cat-workqueue)',
+    struct: 'extern struct workqueue_struct *system_dfl_wq;   /* WQ_UNBOUND */',
+    body: 'The default unbound system workqueue, replacing the deprecated system_unbound_wq. Created with alloc_workqueue("events_unbound", WQ_UNBOUND, WQ_MAX_ACTIVE). Workers can migrate across CPUs within the NUMA node — the CFS scheduler decides placement. Ideal for longer-running work where cache locality matters less than throughput.'
+  },
+  'system-highpri-wq': {
+    title: 'system_highpri_wq',
+    color: 'var(--cat-workqueue)',
+    struct: 'extern struct workqueue_struct *system_highpri_wq;   /* WQ_HIGHPRI */',
+    body: 'High-priority system workqueue. Its per-CPU pwqs point to the highpri pool (nice=-20) instead of the normal pool. Workers run at the highest scheduler priority, preempting normal-priority kworkers.'
+  },
+  'custom-wq': {
+    title: 'Custom Workqueue',
+    color: 'var(--cat-workqueue)',
+    struct: 'alloc_workqueue("my_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, max_active)',
+    body: 'Drivers create custom workqueues for isolation, custom flags (WQ_UNBOUND, WQ_HIGHPRI, WQ_CPU_INTENSIVE, WQ_MEM_RECLAIM), or specific max_active limits. The workqueue shares the underlying worker pools with all other workqueues — it does NOT create its own threads.'
+  },
+  'pwq': {
+    title: 'pool_workqueue (per-CPU)',
+    color: 'var(--cat-pwq)',
+    struct: 'struct pool_workqueue { struct worker_pool *pool; int nr_active; struct list_head inactive_works; ... }',
+    body: 'The bridge between a workqueue and a worker_pool. Looked up via per_cpu_ptr(wq→cpu_pwq, cpu). Holds per-workqueue-per-pool state: nr_active (current active items), inactive_works (throttled items when nr_active ≥ max_active). Multiple workqueues share the same pool but each has its own pwq with independent accounting.'
+  },
+  'pwq-highpri': {
+    title: 'pool_workqueue (highpri)',
+    color: 'var(--cat-pwq)',
+    struct: 'pwq→pool = per-CPU highpri pool (nice = -20)',
+    body: 'For WQ_HIGHPRI workqueues, the pwq points to the high-priority worker pool instead of the normal pool. The pool\'s workers run at nice=-20 (MIN_NICE), giving them higher scheduler priority.'
+  },
+  'pwq-unbound': {
+    title: 'pool_workqueue (unbound)',
+    color: 'var(--cat-pwq)',
+    struct: 'pwq→pool = unbound pool for NUMA node / affinity scope',
+    body: 'For WQ_UNBOUND workqueues, the pwq points to a dynamically created unbound pool. Workers in this pool can run on any CPU within the pool\'s cpumask (typically a NUMA node). The CFS scheduler decides which CPU, enabling load balancing.'
+  },
+  'pool-percpu-normal': {
+    title: 'Per-CPU Worker Pool (Normal)',
+    color: 'var(--cat-pool)',
+    struct: 'struct worker_pool { struct list_head worklist; int nr_running; int nr_idle; ... }',
+    body: 'Each CPU has a normal-priority pool (nice=0). The worklist is a linked list of pending work_structs. nr_running tracks how many workers are on-CPU (not sleeping). When nr_running drops to 0, another idle worker is woken. Workers are bound to this single CPU via kthread_bind_mask().'
+  },
+  'pool-percpu-highpri': {
+    title: 'Per-CPU Worker Pool (High Priority)',
+    color: 'var(--cat-pool)',
+    struct: 'Pool with nice = MIN_NICE (-20)',
+    body: 'Each CPU also has a high-priority pool. Workers run at nice=-20, meaning the scheduler prefers them over normal kworkers. Pool ID is always CPU*2 + 1 (odd numbers). Used by WQ_HIGHPRI workqueues for latency-sensitive work.'
+  },
+  'pool-unbound': {
+    title: 'Unbound Worker Pool',
+    color: 'var(--cat-pool)',
+    struct: 'pool→attrs→cpumask = NUMA node CPUs',
+    body: 'Dynamically created pools for unbound workqueues. Workers can migrate across all CPUs in the pool\'s cpumask. Scope controlled by wq_affn_scope (WQ_AFFN_NUMA, WQ_AFFN_SYSTEM, etc.). Pool IDs start at NR_STD_WORKER_POOLS * nr_cpu_ids.'
+  },
+  'worker-busy': {
+    title: 'Worker — BUSY State',
+    color: 'var(--cat-worker)',
+    struct: 'worker→current_work = work, worker→hentry in pool→busy_hash',
+    body: 'A busy worker is in pool→busy_hash (keyed by work address). It has called process_one_work() and is executing the handler. During execution, the pool lock is released. If the handler sleeps, wq_worker_sleeping() decrements nr_running and may wake another idle worker.'
+  },
+  'worker-idle': {
+    title: 'Worker — IDLE State',
+    color: 'var(--cat-worker)',
+    struct: 'worker→entry in pool→idle_list, state = TASK_IDLE',
+    body: 'An idle worker sits on pool→idle_list waiting for kick_pool() to wake it. After 5 minutes (IDLE_WORKER_TIMEOUT = 300*HZ), the idle_timer fires and sets WORKER_DIE if there are excess idle workers (nr_idle > 1). The pool keeps at least one idle worker alive.'
+  },
+  'worker-highpri': {
+    title: 'Worker — High Priority',
+    color: 'var(--cat-worker)',
+    struct: 'kworker/<cpu>:H<id> — nice = -20',
+    body: 'A kworker in the highpri pool. The "H" in the name indicates high priority. Created by create_worker() with set_user_nice(task, MIN_NICE). Scheduler gives these threads precedence over normal kworkers.'
+  },
+  'worker-unbound': {
+    title: 'Worker — Unbound',
+    color: 'var(--cat-worker)',
+    struct: 'kworker/u<pool_id>:<id>',
+    body: 'An unbound worker that can run on any CPU in the pool\'s cpumask. Created with kthread_bind_mask(task, pool→attrs→cpumask). The "u" prefix and pool_id in the name distinguish it from per-CPU workers. CFS decides which CPU it runs on based on load.'
+  },
+  'execution': {
+    title: 'Work Execution',
+    color: 'var(--cat-driver)',
+    struct: 'process_one_work() → worker→current_func(work)',
+    body: 'The pool lock is released before calling the handler. PENDING bit is cleared before execution (allowing re-queue during handler). After handler returns, pool lock is re-acquired, worker is removed from busy_hash, and pwq_dec_nr_in_flight() may activate throttled work.'
+  },
+  'concurrency': {
+    title: 'Concurrency Management',
+    color: 'var(--cat-pool)',
+    struct: 'nr_running tracked by wq_worker_sleeping() / wq_worker_running()',
+    body: 'The scheduler hooks into kworker scheduling via PF_WQ_WORKER. When a worker sleeps, nr_running-- → if it hits 0 and worklist is non-empty, another idle worker is woken. When a worker wakes, nr_running++ → if >1, keep_working() returns false and excess workers go idle. Target: exactly 1 running worker.'
+  },
+  'lifecycle': {
+    title: 'Worker Lifecycle',
+    color: 'var(--cat-worker)',
+    struct: 'create_worker() → kthread_create_on_node() → kthread_bind_mask()',
+    body: 'Boot: workqueue_init() creates 1 worker per pool. Runtime: manage_workers() creates new workers when may_start_working() returns false (nr_idle=0). Destruction: idle_worker_timeout() fires after 5 min, sets WORKER_DIE on excess idle workers. Pool always keeps ≥1 idle.'
+  }
+};
+
+const tooltip = document.getElementById('tooltip');
+const tooltipTitle = document.getElementById('tooltip-title-text');
+const tooltipStruct = document.getElementById('tooltip-struct');
+const tooltipBody = document.getElementById('tooltip-body');
+const tooltipSwatch = document.getElementById('tooltip-swatch');
+
+document.querySelectorAll('[data-tooltip]').forEach(el => {
+  el.addEventListener('pointerenter', e => {
+    const key = el.getAttribute('data-tooltip');
+    const d = tooltipData[key];
+    if (!d) return;
+
+    tooltipTitle.textContent = d.title;
+    tooltipStruct.textContent = d.struct;
+    tooltipBody.textContent = d.body;
+    tooltipSwatch.style.background = d.color;
+    tooltip.classList.add('visible');
+  });
+
+  el.addEventListener('pointermove', e => {
+    const pad = 16;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    const rect = tooltip.getBoundingClientRect();
+    if (x + rect.width > window.innerWidth - pad) x = e.clientX - rect.width - pad;
+    if (y + rect.height > window.innerHeight - pad) y = e.clientY - rect.height - pad;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  });
+
+  el.addEventListener('pointerleave', () => {
+    tooltip.classList.remove('visible');
+  });
+
+  // keyboard
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', tooltipData[el.getAttribute('data-tooltip')]?.title || '');
+  el.addEventListener('focus', e => {
+    const key = el.getAttribute('data-tooltip');
+    const d = tooltipData[key];
+    if (!d) return;
+    tooltipTitle.textContent = d.title;
+    tooltipStruct.textContent = d.struct;
+    tooltipBody.textContent = d.body;
+    tooltipSwatch.style.background = d.color;
+    tooltip.classList.add('visible');
+    const r = el.getBoundingClientRect();
+    tooltip.style.left = (r.right + 12) + 'px';
+    tooltip.style.top = r.top + 'px';
+  });
+  el.addEventListener('blur', () => tooltip.classList.remove('visible'));
+});
+
+function toggleTheme() {
+  const body = document.body;
+  body.setAttribute('data-theme',
+    body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+
+function toggleTable() {
+  document.getElementById('table-view').classList.toggle('visible');
+}
+</script>
+</body>
+</html>
