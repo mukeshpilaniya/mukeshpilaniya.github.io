@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LUKS Kdump Sequence Diagram Viewer</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- svg-pan-zoom -->
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    /* Prevent default overflow and ensure standard viewport filling */
+    body {
+      touch-action: none;
+    }
+
+    #diagram-container {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+
+    #diagram-container:active {
+      cursor: grabbing;
+    }
+
+    #diagram-container svg {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+    }
+
+    /* Transition utilities */
+    .btn-ctrl {
+      transition: all 0.15s ease-in-out;
+    }
+
+    /* Dark Mode Custom Rules for Mermaid Diagram Text & Backgrounds */
+    .dark .mermaid .note {
+      fill: #1e293b !important;
+      stroke: #334155 !important;
+      color: #f8fafc !important;
+    }
+    .dark .mermaid .noteText {
+      fill: #f8fafc !important;
+    }
+    .dark .mermaid .actor {
+      fill: #1e293b !important;
+      stroke: #475569 !important;
+      color: #f8fafc !important;
+    }
+    .dark .mermaid text.actor > tspan {
+      fill: #f8fafc !important;
+    }
+    .dark .mermaid .messageText {
+      fill: #cbd5e1 !important;
+    }
+    .dark .mermaid .messageLine0, .dark .mermaid .messageLine1 {
+      stroke: #64748b !important;
+    }
+    .dark .mermaid #arrowheadpath {
+      fill: #64748b !important;
+    }
+  </style>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.14.0/dist/mermaid.esm.min.mjs';
+
+    window.panZoomInstance = null;
+    let currentTheme = 'default';
+
+    // Initialize Mermaid Configuration
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      sequence: {
+        useMaxWidth: false,
+        boxMargin: 12,
+        messageMargin: 40,
+        mirrorActors: true
+      }
+    });
+
+    async function renderDiagram(theme = 'default') {
+      const loader = document.getElementById('loading-indicator');
+      const target = document.getElementById('mermaid-target');
+      const rawDiagramCode = document.getElementById('mermaid-source').textContent;
+
+      loader.classList.remove('hidden');
+
+      // Cleanup previous panZoom instance if present
+      if (window.panZoomInstance) {
+        window.panZoomInstance.destroy();
+        window.panZoomInstance = null;
+      }
+
+      try {
+        // Re-initialize mermaid with selected theme
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: theme,
+          securityLevel: 'loose',
+          sequence: {
+            useMaxWidth: false,
+            boxMargin: 12,
+            messageMargin: 40,
+            mirrorActors: true
+          }
+        });
+
+        // Unique ID generation for container re-render
+        const renderId = 'kdump-diagram-svg-' + Date.now();
+        target.innerHTML = '';
+
+        const { svg } = await mermaid.render(renderId, rawDiagramCode);
+        target.innerHTML = svg;
+
+        const svgElement = target.querySelector('svg');
+        if (svgElement) {
+          // Prepare SVG element for pan-zoom attachment
+          svgElement.removeAttribute('style');
+          svgElement.style.width = '100%';
+          svgElement.style.height = '100%';
+
+          // Attach svg-pan-zoom instance
+          window.panZoomInstance = svgPanZoom(svgElement, {
+            zoomEnabled: true,
+            controlIconsEnabled: false,
+            fit: true,
+            center: true,
+            minZoom: 0.1,
+            maxZoom: 20,
+            zoomScaleSensitivity: 0.2,
+            dblClickZoomEnabled: true,
+            mouseWheelZoomEnabled: true
+          });
+
+          // Keep fit on window resize
+          window.onresize = () => {
+            if (window.panZoomInstance) {
+              window.panZoomInstance.resize();
+              window.panZoomInstance.fit();
+              window.panZoomInstance.center();
+            }
+          };
+        }
+      } catch (error) {
+        console.error('Mermaid rendering failed:', error);
+        target.innerHTML = `
+          <div class="p-6 text-red-500 bg-red-100 dark:bg-red-950/40 rounded-lg border border-red-300">
+            <h3 class="font-bold text-lg"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Diagram Render Error</h3>
+            <p class="text-sm mt-1">${error.message || 'Syntax error or unsupported format.'}</p>
+          </div>
+        `;
+      } finally {
+        loader.classList.add('hidden');
+      }
+    }
+
+    // Attach control handlers to global window context
+    window.zoomIn = () => window.panZoomInstance && window.panZoomInstance.zoomIn();
+    window.zoomOut = () => window.panZoomInstance && window.panZoomInstance.zoomOut();
+    window.resetView = () => {
+      if (window.panZoomInstance) {
+        window.panZoomInstance.reset();
+        window.panZoomInstance.fit();
+        window.panZoomInstance.center();
+      }
+    };
+    window.fitToScreen = () => {
+      if (window.panZoomInstance) {
+        window.panZoomInstance.fit();
+        window.panZoomInstance.center();
+      }
+    };
+
+    window.toggleFullscreen = () => {
+      const container = document.getElementById('viewer-app');
+      if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(err => console.error(err));
+      } else {
+        document.exitFullscreen();
+      }
+    };
+
+    window.toggleTheme = () => {
+      const isDark = document.documentElement.classList.toggle('dark');
+      currentTheme = isDark ? 'dark' : 'default';
+      renderDiagram(currentTheme);
+    };
+
+    window.exportSVG = () => {
+      const svgElement = document.querySelector('#mermaid-target svg');
+      if (!svgElement) return;
+
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'luks-kdump-sequence.svg';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
+
+    window.exportPNG = () => {
+      const svgElement = document.querySelector('#mermaid-target svg');
+      if (!svgElement) return;
+
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      img.onload = () => {
+        // High resolution rendering (2x scale)
+        const scale = 2;
+        canvas.width = (svgElement.clientWidth || 1200) * scale;
+        canvas.height = (svgElement.clientHeight || 800) * scale;
+
+        ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = pngUrl;
+        link.download = 'luks-kdump-sequence.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
+      img.src = url;
+    };
+
+    // Render initial diagram on DOM ready
+    window.addEventListener('DOMContentLoaded', () => {
+      renderDiagram('default');
+    });
+  </script>
+</head>
+
+<body class="h-full bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+
+  <div id="viewer-app" class="h-full flex flex-col w-full bg-slate-100 dark:bg-slate-900">
+
+    <!-- Top Toolbar Controls -->
+    <header class="bg-slate-900 text-slate-100 px-4 py-3 shadow-md border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 z-30">
+
+      <!-- Title Block -->
+      <div class="flex items-center space-x-3">
+        <div class="bg-blue-600 text-white p-2 rounded-lg shadow">
+          <i class="fa-solid fa-diagram-project text-lg"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold leading-none">LUKS Kdump Sequence Diagram</h1>
+          <p class="text-xs text-slate-400 mt-1">Interactive Viewer (Mermaid v11.14.0)</p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex flex-wrap items-center gap-1.5 bg-slate-800/80 p-1.5 rounded-lg border border-slate-700/60 shadow-inner">
+
+        <!-- Zoom Controls -->
+        <button onclick="zoomIn()" title="Zoom In (+)" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-blue-600 active:bg-blue-700 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-magnifying-glass-plus"></i>
+          <span class="hidden sm:inline">Zoom In</span>
+        </button>
+
+        <button onclick="zoomOut()" title="Zoom Out (-)" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-blue-600 active:bg-blue-700 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-magnifying-glass-minus"></i>
+          <span class="hidden sm:inline">Zoom Out</span>
+        </button>
+
+        <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+
+        <!-- Reset & Fit -->
+        <button onclick="resetView()" title="Reset Zoom & Pan" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-blue-600 active:bg-blue-700 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span class="hidden md:inline">Reset</span>
+        </button>
+
+        <button onclick="fitToScreen()" title="Fit Diagram to Viewport" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-blue-600 active:bg-blue-700 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-expand"></i>
+          <span class="hidden md:inline">Fit Screen</span>
+        </button>
+
+        <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+
+        <!-- Theme & Fullscreen -->
+        <button onclick="toggleTheme()" title="Toggle Dark/Light Mode" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-amber-600 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-moon dark:hidden"></i>
+          <i class="fa-solid fa-sun hidden dark:inline text-amber-300"></i>
+          <span class="hidden lg:inline">Theme</span>
+        </button>
+
+        <button onclick="toggleFullscreen()" title="Toggle Fullscreen" class="btn-ctrl px-2.5 py-1.5 bg-slate-700 hover:bg-blue-600 text-xs font-medium rounded text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-arrows-maximize"></i>
+          <span class="hidden lg:inline">Fullscreen</span>
+        </button>
+
+        <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+
+        <!-- Export Dropdown / Buttons -->
+        <button onclick="exportSVG()" title="Export SVG" class="btn-ctrl px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-xs font-medium rounded text-white flex items-center gap-1">
+          <i class="fa-solid fa-file-code"></i>
+          <span class="hidden xl:inline">SVG</span>
+        </button>
+
+        <button onclick="exportPNG()" title="Export PNG" class="btn-ctrl px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-xs font-medium rounded text-white flex items-center gap-1">
+          <i class="fa-solid fa-file-image"></i>
+          <span class="hidden xl:inline">PNG</span>
+        </button>
+      </div>
+
+    </header>
+
+    <!-- Sub-header Instruction Bar -->
+    <div class="bg-slate-200 dark:bg-slate-800/80 border-b border-slate-300 dark:border-slate-700/60 px-4 py-1.5 text-xs text-slate-600 dark:text-slate-400 flex justify-between items-center z-20">
+      <div class="flex items-center gap-3">
+        <span><i class="fa-solid fa-hand-pointer mr-1"></i> Drag to pan</span>
+        <span class="hidden sm:inline">• Scroll / Pinch to zoom</span>
+        <span class="hidden md:inline">• Double-click to zoom in</span>
+      </div>
+      <div class="font-mono text-[11px] bg-slate-300 dark:bg-slate-700 px-2 py-0.5 rounded text-slate-700 dark:text-slate-300">
+        Mermaid v11.14.0
+      </div>
+    </div>
+
+    <!-- Main Viewport Area -->
+    <main class="flex-1 relative overflow-hidden bg-slate-50 dark:bg-slate-950">
+
+      <!-- Loading Indicator -->
+      <div id="loading-indicator" class="absolute inset-0 bg-slate-50/80 dark:bg-slate-950/80 z-20 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200">
+        <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-3"></i>
+        <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">Rendering Diagram...</p>
+      </div>
+
+      <!-- Diagram Canvas Wrapper -->
+    <div id="diagram-container">
+      <div id="mermaid-target" class="w-full h-full flex items-center justify-center p-4"></div>
+    </div>
+  </main>
+
+</div>
+
+<script type="text/template" id="mermaid-source">
+sequenceDiagram
+    participant SETUP as luks-kdump-test.sh<br/>(first-kernel script)
+    participant CS1 as cryptsetup (first kernel)
+    participant KR1 as First-kernel keyring (@u)
+    participant CFG as configfs<br/>crash_dm_crypt_keys
+    participant K1 as First kernel (kexec_file_load)
+    participant MEM as Crash-reserved memory
+    participant K2 as Second kernel (crash) boot
+    participant INIT2 as kdump-init<br/>(second-kernel script)
+    participant CFG2 as configfs<br/>restore attribute
+    participant KR2 as Second-kernel keyring (@u)
+    participant CS2 as cryptsetup (second kernel)
+    participant DM as dm-crypt mapping
+
+    rect rgb(239, 246, 255)
+    Note over SETUP,MEM: First kernel — healthy, running production kernel
+    SETUP->>CS1: cryptsetup luksFormat --key-file /root/kdump-luks.key (Argon2id)
+    SETUP->>CS1: cryptsetup open --key-file ... --link-vk-to-keyring '@u::%logon:cryptsetup:⟨uuid⟩'
+    activate CS1
+    CS1->>CS1: Unwrap volume key via PBKDF (Argon2id)
+    CS1->>KR1: Create LOGON key 'cryptsetup:⟨uuid⟩' with raw volume key
+    CS1->>DM: Activate dm-crypt mapping (kdump_luks)
+    deactivate CS1
+    SETUP->>CFG: mkdir crash_dm_crypt_keys/⟨uuid⟩ && echo 'cryptsetup:⟨uuid⟩' › description
+    SETUP->>K1: kexec -p -s bzImage (kexec_file_load)
+    activate K1
+    K1->>CFG: Read registered key descriptions
+    K1->>KR1: request_key(logon, 'cryptsetup:⟨uuid⟩')
+    K1->>K1: Copy raw key bytes into keys_header struct
+    K1->>MEM: kexec_add_buffer() places keys_header at random address
+    K1->>K1: Append 'dmcryptkeys=0x⟨addr⟩' to crash kernel cmdline
+    deactivate K1
+    end
+
+    rect rgb(254, 242, 242)
+    Note over SETUP,MEM: Panic — control hands off to the second kernel
+    SETUP->>SETUP: echo c › /proc/sysrq-trigger
+    end
+
+    rect rgb(255, 247, 237)
+    Note over K2,DM: Second kernel, crash — dump-capture kernel
+    activate K2
+    K2->>K2: Boot with elfcorehdr= and dmcryptkeys=0x⟨addr⟩
+    K2->>K2: early_param 'dmcryptkeys' stores addr
+    deactivate K2
+    INIT2->>CFG2: mount configfs && echo yes › restore
+    CFG2->>MEM: dm_crypt_keys_read() from reserved address
+    CFG2->>KR2: Create USER key 'cryptsetup:⟨uuid⟩' with same raw bytes
+    INIT2->>CS2: cryptsetup open --volume-key-keyring '%user:cryptsetup:⟨uuid⟩'
+    activate CS2
+    CS2->>KR2: Read USER key payload directly (no passphrase)
+    CS2->>CS2: Verify key digest against LUKS2 header (no KDF)
+    CS2->>DM: Activate dm-crypt mapping (kdump_luks)
+    deactivate CS2
+    INIT2->>DM: dd if=/proc/vmcore of=/mnt/vmcore
+    end
+</script>
+
+</body>
+</html>
